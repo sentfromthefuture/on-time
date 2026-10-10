@@ -1,0 +1,24 @@
+kind = "web"
+previewPath = "/"
+title = "Spark"
+description = "A mobile-first progressive web dating app for discovering people, sending likes and sparks, and managing a dating profile."
+version = "1.0.0"
+id = "artifacts/spark"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21615
+
+[services.development]
+run = "pnpm --filter @workspace/spark run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/spark", "run", "build" ]
+serve = "static"
+publicDir = "docs"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"

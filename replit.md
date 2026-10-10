@@ -1,45 +1,46 @@
-# [Project name]
+# Spark
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A mobile-first dating PWA for discovering people, sharing likes and sparks, and managing a dating profile.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `pnpm --filter @workspace/spark run dev` — run the Spark preview
+- `pnpm --filter @workspace/spark run build` — build the GitHub Pages site into `docs/`
+- `pnpm --filter @workspace/spark run typecheck` — typecheck the Spark app
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- pnpm workspace, React, Vite, TypeScript
+- Supabase Auth, RPCs, and Storage; the Supabase backend already exists
+- Tailwind CSS, Framer Motion, and vite-plugin-pwa
+- GitHub Pages static hosting from the committed root `docs/` directory
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/spark/` — web app source and build configuration
+- `artifacts/spark/src/config.ts` — the only application configuration file; contains the public Supabase URL/key and app name
+- `docs/` — generated GitHub Pages site; do not ignore or omit it from commits
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Supabase is the existing system of record; do not create tables, SQL, migrations, or edge functions.
+- Use HashRouter, relative Vite base paths, and `docs/` output for the GitHub Pages project site.
+- Keep application configuration in `artifacts/spark/src/config.ts`; do not introduce environment variables or Replit Secrets.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Spark provides email/password authentication, profile onboarding and editing, swipe-based discovery, Likes, a Sparks placeholder for part 2, travel mode, mood settings, streak display, and account deletion.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Email/password authentication only; no magic links and no password-reset flow.
+- Profile photos are limited to three, compressed in the browser, and stored in Supabase's `photos` bucket.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Run the Spark build after code/config changes so the committed GitHub Pages `docs/` output stays current.
+- `.gitignore` should contain only `node_modules`; keep `docs/` tracked.
 
 ## Pointers
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- See the `pnpm-workspace` skill for workspace structure and package details.
