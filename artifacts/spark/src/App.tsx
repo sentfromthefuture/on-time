@@ -11,6 +11,10 @@ import { APP_NAME } from '@/config';
 import { photoUrl, supabase, type SparkProfile } from '@/lib/supabase';
 import { compressPhoto, storagePathFromPublicUrl } from '@/lib/photos';
 import { LUSAKA, saveLocation, syncLocation, type Coords } from '@/lib/location';
+import { SparksBadge, SparksProvider, useSparks } from '@/components/sparks/SparksProvider';
+import { EffectsHost } from '@/components/sparks/Effects';
+import SparksPage from '@/components/sparks/SparksPage';
+import ChatPage from '@/components/sparks/ChatPage';
 
 const genderOptions = ['man', 'woman', 'nonbinary', 'other'];
 const interestOptions = ['Live music', 'Long walks', 'Cooking', 'Art', 'Books', 'Outdoors', 'Film', 'Coffee', 'Travel', 'Design', 'Dance', 'Museums'];
@@ -22,6 +26,8 @@ const errorText = (error: unknown): string => {
   }
   return 'Something went wrong. Please try again.';
 };
+type MatchPopup = { person?: SparkProfile; expires?: string; matchId?: string };
+const matchIdOf = (record: Record<string, unknown>) => (typeof record.match_id === 'string' ? record.match_id : typeof record.id === 'string' ? record.id : undefined);
 // Always hand Supabase a real array, never a JSON string such as "[]".
 const asArray = (value: unknown): unknown[] => {
   if (Array.isArray(value)) return value;
@@ -409,7 +415,18 @@ function ProfileEditor({ initial, onSaved, mode, loadError = '' }: { initial: Sp
 }
 
 type TabKey = 'discover' | 'likes' | 'sparks' | 'profile';
-function AppShell({ user, profile, streakCount, streakError, setProfile, reloadProfile }: { user: User; profile: SparkProfile; streakCount: number | null; streakError: string; setProfile: (profile: SparkProfile | null) => void; reloadProfile: () => void | Promise<void> }) {
+type ShellProps = { user: User; profile: SparkProfile; streakCount: number | null; streakError: string; setProfile: (profile: SparkProfile | null) => void; reloadProfile: () => void | Promise<void> };
+
+function AppShell(props: ShellProps) {
+  return (
+    <SparksProvider userId={props.user.id} myPhoto={props.profile.photos?.[0]}>
+      <ShellBody {...props} />
+      <EffectsHost />
+    </SparksProvider>
+  );
+}
+
+function ShellBody({ user, profile, streakCount, streakError, setProfile, reloadProfile }: ShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const activeTab: TabKey = location.pathname.startsWith('/likes') ? 'likes' : location.pathname.startsWith('/sparks') ? 'sparks' : location.pathname.startsWith('/profile') ? 'profile' : 'discover';
@@ -420,6 +437,10 @@ function AppShell({ user, profile, streakCount, streakError, setProfile, reloadP
     { key: 'profile', label: 'Profile', icon: UserRound, path: '/profile' },
   ];
   const [radius, setRadius] = useState(Number(profile.max_km || 50));
+  // A chat is full screen: no header or tab bar.
+  if (/^\/sparks\/[^/]+/.test(location.pathname)) {
+    return <Routes><Route path="/sparks/:matchId" element={<ChatPage />} /></Routes>;
+  }
   return (
     <div className="spark-shell min-h-[100dvh] pb-[calc(78px+env(safe-area-inset-bottom))]">
       <header className="sticky top-0 z-20 border-b border-white/[.045] bg-[#14141b]/85 px-5 py-3 backdrop-blur-xl">
@@ -433,7 +454,7 @@ function AppShell({ user, profile, streakCount, streakError, setProfile, reloadP
         <Routes>
           <Route path="/" element={<Discover radius={radius} setRadius={setRadius} />} />
           <Route path="/likes" element={<Likes />} />
-          <Route path="/sparks" element={<Sparks />} />
+          <Route path="/sparks" element={<SparksPage />} />
           <Route path="/profile/edit" element={<ProfileEditor initial={profile} onSaved={reloadProfile} mode="edit" />} />
           <Route path="/profile" element={<ProfilePage user={user} profile={profile} streakCount={streakCount} streakError={streakError} setProfile={setProfile} />} />
           <Route path="/settings" element={<SettingsPage profile={profile} radius={radius} setRadius={setRadius} />} />
@@ -442,7 +463,7 @@ function AppShell({ user, profile, streakCount, streakError, setProfile, reloadP
       </div>
       <nav aria-label="Main navigation" className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-white/[.07] bg-[#17171f]/95 px-3 pt-2 backdrop-blur-xl">
         <div className="mx-auto grid max-w-lg grid-cols-4">
-          {navItems.map(({ key, label, icon: Icon, path }) => <NavLink to={path} key={key} end={key === 'discover'} data-testid={`nav-${key}`} className={({ isActive }) => `relative flex min-h-14 flex-col items-center justify-center gap-1 text-[10px] font-semibold transition ${isActive ? 'text-rose-300' : 'text-slate-500 hover:text-slate-300'}`}><Icon size={20} strokeWidth={activeTab === key ? 2.35 : 1.8} /><span>{label}</span>{activeTab === key && <span className="absolute -top-[9px] h-0.5 w-7 rounded-full bg-rose-300" />}</NavLink>)}
+          {navItems.map(({ key, label, icon: Icon, path }) => <NavLink to={path} key={key} end={key === 'discover'} data-testid={`nav-${key}`} className={({ isActive }) => `relative flex min-h-14 flex-col items-center justify-center gap-1 text-[10px] font-semibold transition ${isActive ? 'text-rose-300' : 'text-slate-500 hover:text-slate-300'}`}><Icon size={20} strokeWidth={activeTab === key ? 2.35 : 1.8} /><span>{label}</span>{key === 'sparks' && <SparksBadge />}{activeTab === key && <span className="absolute -top-[9px] h-0.5 w-7 rounded-full bg-rose-300" />}</NavLink>)}
         </div>
       </nav>
     </div>
@@ -455,7 +476,7 @@ function Discover({ radius, setRadius }: { radius: number; setRadius: (radius: n
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [swiping, setSwiping] = useState(false);
-  const [match, setMatch] = useState<{ person?: SparkProfile; expires?: string } | null>(null);
+  const [match, setMatch] = useState<MatchPopup | null>(null);
   const [wyr, setWyr] = useState<Record<string, unknown> | null>(null);
   const [answering, setAnswering] = useState(false);
   const [locError, setLocError] = useState('');
@@ -507,7 +528,7 @@ function Discover({ radius, setRadius }: { radius: number; setRadius: (radius: n
       const payload = Array.isArray(data) ? data[0] : data;
       if (payload && typeof payload === 'object' && (payload as Record<string, unknown>).matched === true) {
         const record = payload as Record<string, unknown>;
-        setMatch({ person, expires: typeof record.expires_at === 'string' ? record.expires_at : undefined });
+        setMatch({ person, expires: typeof record.expires_at === 'string' ? record.expires_at : undefined, matchId: matchIdOf(record) });
       }
       setCanUndo(true);
       seen.current += 1;
@@ -589,25 +610,39 @@ function Discover({ radius, setRadius }: { radius: number; setRadius: (radius: n
   );
 }
 
-function MatchModal({ match, onClose }: { match: { person?: SparkProfile; expires?: string }; onClose: () => void }) {
+function MatchModal({ match, onClose }: { match: MatchPopup; onClose: () => void }) {
   const [remaining, setRemaining] = useState('');
+  const [opening, setOpening] = useState(false);
   const navigate = useNavigate();
+  const { matches, clockOffset, refresh } = useSparks();
+  const findRow = (rows: typeof matches) => rows.find((item) => (match.matchId ? item.match_id === match.matchId : item.user_id === match.person?.id));
+  const row = findRow(matches);
+  const expires = row?.expires_at ?? match.expires;
+  // Pull the brand-new match (and the server clock) into the Sparks list.
+  useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
     const update = () => {
-      if (!match.expires) { setRemaining('24 hours'); return; }
-      const ms = Math.max(0, new Date(match.expires).getTime() - Date.now());
+      if (!expires) { setRemaining('24 hours'); return; }
+      const ms = Math.max(0, Date.parse(expires) - (Date.now() + clockOffset));
       setRemaining(`${Math.floor(ms / 3_600_000)}h ${Math.floor(ms % 3_600_000 / 60_000)}m`);
     };
     update(); const timer = window.setInterval(update, 30_000);
     return () => window.clearInterval(timer);
-  }, [match.expires]);
+  }, [expires, clockOffset]);
+  const openChat = async () => {
+    setOpening(true);
+    let id = row?.match_id;
+    if (!id) id = findRow(await refresh())?.match_id;
+    onClose();
+    navigate(id ? `/sparks/${id}` : '/sparks');
+  };
   return <div role="dialog" aria-modal="true" aria-labelledby="match-title" className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-[#0e0e14]/90 p-5 backdrop-blur-md">
     <div className="confetti" aria-hidden="true">{Array.from({ length: 22 }, (_, i) => <i key={i} style={{ left: `${(i * 37) % 100}%`, animationDelay: `${(i % 6) * .16}s`, background: i % 3 === 0 ? '#f39aab' : i % 3 === 1 ? '#f3c575' : '#b1d3ca' }} />)}</div>
     <div className="relative z-10 w-full max-w-sm animate-in text-center">
       <div className="mx-auto mb-7 flex justify-center -space-x-5">{[match.person?.photos?.[0], null].map((image, index) => <div key={index} className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-4 border-[#18171f] bg-[#30222b]">{image ? <img src={photoUrl(image)} alt="" loading="lazy" className="h-full w-full object-cover" /> : <Sparkles className="text-rose-200" size={28} />}</div>)}</div>
       <p className="text-xs font-bold uppercase tracking-[.24em] text-rose-300">Good feeling, confirmed</p><h2 id="match-title" className="display mt-3 text-4xl font-extrabold">Your spark starts now</h2><p className="mt-3 text-sm text-slate-400">{match.person?.name ? `You and ${match.person.name} liked each other.` : 'A new connection is waiting.'}</p>
       <div className="mx-auto mt-6 flex w-fit items-center gap-2 rounded-full border border-amber-200/15 bg-amber-200/[.06] px-4 py-2 text-xs text-amber-100"><Zap size={13} /> This spark is live for {remaining}</div>
-      <button className="primary-button mt-7 flex w-full items-center justify-center gap-2" onClick={() => { onClose(); navigate('/sparks'); }}>Go to Sparks <ArrowRight size={17} /></button>
+      <button disabled={opening} data-testid="match-open-chat" className="primary-button mt-7 flex w-full items-center justify-center gap-2" onClick={() => void openChat()}>{opening ? 'Opening…' : 'Open chat'} <ArrowRight size={17} /></button>
       <button onClick={onClose} className="mt-4 text-sm text-slate-500 hover:text-slate-300">Keep discovering</button>
     </div>
   </div>;
@@ -618,7 +653,7 @@ function Likes() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [acting, setActing] = useState<string | null>(null);
-  const [match, setMatch] = useState<{ person?: SparkProfile; expires?: string } | null>(null);
+  const [match, setMatch] = useState<MatchPopup | null>(null);
   const load = useCallback(async () => {
     setLoading(true); setError('');
     const { data, error: queryError } = await supabase.rpc('who_liked_me');
@@ -636,7 +671,7 @@ function Likes() {
       const payload = Array.isArray(data) ? data[0] : data;
       if (payload && typeof payload === 'object' && (payload as Record<string, unknown>).matched === true) {
         const result = payload as Record<string, unknown>;
-        setMatch({ person, expires: typeof result.expires_at === 'string' ? result.expires_at : undefined });
+        setMatch({ person, expires: typeof result.expires_at === 'string' ? result.expires_at : undefined, matchId: matchIdOf(result) });
       }
     }
     setActing(null);
@@ -653,16 +688,6 @@ function Likes() {
         </article>)}</div>}
     {likes.length > 0 && !loading && <button onClick={() => void load()} className="secondary-button mt-5 w-full">Refresh likes</button>}
     {match && <MatchModal match={match} onClose={() => setMatch(null)} />}
-  </section>;
-}
-
-function Sparks() {
-  return <section className="animate-in">
-    <div className="mb-6"><p className="text-xs font-bold uppercase tracking-[.2em] text-rose-300">Where it could go</p><h1 className="display mt-1 text-3xl font-extrabold">Sparks</h1><p className="mt-2 text-sm text-slate-400">Your mutual connections, gathered in one place.</p></div>
-    <div className="panel relative flex min-h-[380px] flex-col items-center justify-center overflow-hidden px-7 text-center">
-      <div className="absolute left-[12%] top-[18%] h-24 w-24 rounded-full border border-rose-200/[.05]" /><div className="absolute bottom-[15%] right-[10%] h-32 w-32 rounded-full border border-amber-200/[.05]" />
-       <div className="empty-orbit mb-6"><MessageCircle size={25} /></div><h2 className="display text-2xl font-bold">Sparks are coming in part 2.</h2><p className="mt-3 max-w-sm text-sm leading-6 text-slate-400">For now, keep discovering. Your mutual connections will have a home here soon.</p><span className="mt-7 rounded-full border border-slate-700/80 bg-slate-950/30 px-4 py-2 text-xs text-slate-500">Coming in part 2</span>
-    </div>
   </section>;
 }
 
