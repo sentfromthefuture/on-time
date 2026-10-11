@@ -10,10 +10,39 @@ import {
 import { APP_NAME } from '@/config';
 import { photoUrl, supabase, type SparkProfile } from '@/lib/supabase';
 import { compressPhoto, storagePathFromPublicUrl } from '@/lib/photos';
+import { LUSAKA, saveLocation, syncLocation, type Coords } from '@/lib/location';
 
 const genderOptions = ['man', 'woman', 'nonbinary', 'other'];
 const interestOptions = ['Live music', 'Long walks', 'Cooking', 'Art', 'Books', 'Outdoors', 'Film', 'Coffee', 'Travel', 'Design', 'Dance', 'Museums'];
-const errorText = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+const errorText = (error: unknown): string => {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error) return error;
+  if (error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string' && (error as { message: string }).message) {
+    return (error as { message: string }).message;
+  }
+  return 'Something went wrong. Please try again.';
+};
+// Always hand Supabase a real array, never a JSON string such as "[]".
+const asArray = (value: unknown): unknown[] => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* not JSON, fall through */ }
+  }
+  return [];
+};
+// Drops any stored onboarding flag or cached profile so a stale "no profile" can never be reused.
+const clearOnboardingCache = () => {
+  for (const store of [window.localStorage, window.sessionStorage]) {
+    try {
+      Object.keys(store)
+        .filter((key) => !key.startsWith('sb-') && /onboard|profile[-_:.]?cache|cached[-_:.]?profile|has[-_:.]?profile|spark[-_:.]?profile/i.test(key))
+        .forEach((key) => store.removeItem(key));
+    } catch (error) { console.error('Could not clear cached onboarding data:', error); }
+  }
+};
 const ageFromDate = (value?: string) => {
   if (!value) return undefined;
   const born = new Date(`${value}T00:00:00`);
@@ -58,86 +87,141 @@ function draftFromProfile(profile?: SparkProfile | null): ProfileDraft {
     vibe: String(profile.vibe || ''),
     minAge: Number(profile.min_age || 22),
     maxAge: Number(profile.max_age || 36),
-    prompts: Array.isArray(profile.prompts) ? profile.prompts : [],
+    prompts: asArray(profile.prompts),
   };
 }
 
 function App() {
   const [streakCount, setStreakCount] = useState<number | null>(null);
+  const [streakError, setStreakError] = useState('');
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<SparkProfile | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
-  const [profileLoading, setProfileLoading] = useState(false);
+  const [startupError, setStartupError] = useState('');
+  // null = still checking, true/false = known. Only a successful query ever sets false.
+  const [hasProfile, setHasProfile] = useState<boolean | null>(null);
   const [profileError, setProfileError] = useState('');
-  const loadedUser = useRef('');
-  const needsOnboarding = !profile || !profile.name || !profile.birthdate || !profile.gender || !profile.interested_in;
+  const checkedUser = useRef('');
+  const streakUser = useRef('');
 
+  // Loads the full profile for display. It never decides routing and throws real error messages.
   const loadProfile = useCallback(async (user: User) => {
-    setProfileLoading(true);
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    if (error) {
+      console.error('Could not load profile:', error);
+      throw new Error(error.message);
+    }
+    if (!data) throw new Error('Your profile was saved but could not be read back. Please try again.');
+    setProfile(data as SparkProfile);
+  }, []);
+
+  const refreshProfile = useCallback(async (user: User) => {
+    try {
+      await loadProfile(user);
+      setProfileError('');
+    } catch (error) {
+      setProfileError(errorText(error));
+    }
+  }, [loadProfile]);
+
+  // The single source of truth for "does this user have a profile row?"
+  const checkProfile = useCallback(async (session: Session) => {
     setProfileError('');
-    const result = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
-    setProfileLoading(false);
-    if (result.error) {
-      setProfileError(result.error.message);
+    setHasProfile(null);
+    const { data, error } = await supabase.from('profiles').select('id').eq('id', session.user.id).maybeSingle();
+    if (error) {
+      console.error('Profile check failed:', error);
+      setProfileError(error.message);
       return;
     }
-    setProfile((result.data as SparkProfile | null) || null);
-  }, []);
+    setHasProfile(!!data);
+    if (data) await refreshProfile(session.user);
+  }, [refreshProfile]);
 
   useEffect(() => {
     let alive = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (!alive) return;
-      setSession(data.session);
-      setSessionLoading(false);
-      if (data.session?.user) void loadProfile(data.session.user);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => {
+    const handle = (next: Session | null) => {
       setSession(next);
-      if (next?.user) void loadProfile(next.user);
-      else {
+      if (next?.user) {
+        if (checkedUser.current === next.user.id) return;
+        checkedUser.current = next.user.id;
+        // Deferred so we never run Supabase calls inside the auth callback itself.
+        window.setTimeout(() => { if (alive) void checkProfile(next); }, 0);
+      } else {
+        checkedUser.current = '';
+        streakUser.current = '';
         setProfile(null);
+        setHasProfile(null);
         setProfileError('');
-        loadedUser.current = '';
+        setStreakCount(null);
+        setStreakError('');
       }
+    };
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!alive) return;
+      if (error) { console.error('Could not read the saved session:', error); setStartupError(error.message); }
+      setSessionLoading(false);
+      handle(data.session);
     });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => handle(next));
     return () => { alive = false; listener.subscription.unsubscribe(); };
-  }, [loadProfile]);
+  }, [checkProfile]);
 
+  // Streak only runs once we know the user has a profile.
   useEffect(() => {
     const user = session?.user;
-    if (!user || loadedUser.current === user.id) return;
-    loadedUser.current = user.id;
+    if (!user || hasProfile !== true || streakUser.current === user.id) return;
+    streakUser.current = user.id;
     void supabase.rpc('touch_streak').then(({ data, error }) => {
-      if (error) return;
+      if (error) { console.error('Could not update streak:', error); setStreakError(error.message); return; }
       const streak = Array.isArray(data) ? data[0] : data;
       const value = typeof streak === 'number'
         ? streak
         : streak && typeof streak === 'object'
           ? Number((streak as Record<string, unknown>).streak ?? (streak as Record<string, unknown>).current_streak)
           : Number.NaN;
-      if (Number.isFinite(value)) setStreakCount(value);
+      if (Number.isFinite(value)) { setStreakCount(value); setStreakError(''); }
     });
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(({ coords }) => {
-        void supabase.rpc('update_my_location', { p_lat: coords.latitude, p_lng: coords.longitude });
-      }, () => undefined, { enableHighAccuracy: false, timeout: 9000, maximumAge: 60_000 });
-    }
-  }, [session?.user]);
+  }, [session?.user, hasProfile]);
 
   useEffect(() => { document.title = APP_NAME; }, []);
+
+  // Called right after upsert_my_profile succeeds during onboarding.
+  const finishOnboarding = useCallback(() => {
+    clearOnboardingCache();
+    setHasProfile(true);
+    setProfileError('');
+    if (session?.user) void refreshProfile(session.user);
+    // Location is best effort here and never affects routing; Discover retries and shows a banner.
+    void syncLocation().catch((error) => console.error('Location update after saving profile failed:', error));
+  }, [session?.user, refreshProfile]);
+
+  const retry = () => {
+    if (!session) return;
+    if (hasProfile === true) { setProfileError(''); void refreshProfile(session.user); }
+    else void checkProfile(session);
+  };
 
   return (
     <HashRouter>
       <Routes>
-        <Route path="/auth" element={sessionLoading ? <LoadingScreen label="Opening Spark" /> : session ? <Navigate to="/" replace /> : <AuthScreen />} />
-        <Route path="/onboarding" element={sessionLoading || profileLoading ? <LoadingScreen label="Getting your profile ready" /> : session ? <ProfileGate profile={profile} error={profileError} refresh={() => loadProfile(session.user)} mode="onboarding" /> : <Navigate to="/auth" replace />} />
-        <Route path="/*" element={
-          sessionLoading || (session && profileLoading) ? <LoadingScreen label="Opening Spark" /> :
+        <Route path="/auth" element={sessionLoading ? <LoadingScreen label="Opening Spark" /> : session ? <Navigate to="/" replace /> : <AuthScreen initialError={startupError} />} />
+        <Route path="/onboarding" element={
+          sessionLoading ? <LoadingScreen label="Opening Spark" /> :
             !session ? <Navigate to="/auth" replace /> :
-              profileError ? <LoadError message={profileError} retry={() => loadProfile(session.user)} /> :
-                needsOnboarding ? <Navigate to="/onboarding" replace /> :
-                  <AppShell user={session.user} profile={profile} streakCount={streakCount} setProfile={setProfile} reloadProfile={() => loadProfile(session.user)} />
+              profileError ? <LoadError message={profileError} retry={retry} /> :
+                hasProfile === null ? <LoadingScreen label="Checking your profile" /> :
+                  hasProfile ? <Navigate to="/" replace /> :
+                    <ProfileEditor initial={null} onSaved={finishOnboarding} mode="onboarding" />
+        } />
+        <Route path="/*" element={
+          sessionLoading ? <LoadingScreen label="Opening Spark" /> :
+            !session ? <Navigate to="/auth" replace /> :
+              profileError ? <LoadError message={profileError} retry={retry} /> :
+                hasProfile === false ? <Navigate to="/onboarding" replace /> :
+                  hasProfile && profile ?
+                    <AppShell user={session.user} profile={profile} streakCount={streakCount} streakError={streakError} setProfile={setProfile} reloadProfile={() => loadProfile(session.user)} /> :
+                    <LoadingScreen label="Opening Spark" />
         } />
       </Routes>
     </HashRouter>
@@ -148,13 +232,13 @@ function LoadingScreen({ label }: { label: string }) {
   return <main className="spark-shell grid min-h-[100dvh] place-items-center px-6"><div className="text-center"><div className="brand-mark mx-auto mb-5"><Sparkles size={22} /></div><LoaderCircle className="mx-auto animate-spin text-rose-300" size={21} /><p className="mt-3 text-sm text-slate-400">{label}</p></div></main>;
 }
 
-function AuthScreen() {
+function AuthScreen({ initialError = '' }: { initialError?: string }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialError);
   const go = useNavigate();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -175,7 +259,7 @@ function AuthScreen() {
         if (authError) throw authError;
         go('/');
       }
-    } catch (err) { setError(errorText(err)); }
+    } catch (err) { console.error('Authentication failed:', err); setError(errorText(err)); }
     finally { setPending(false); }
   };
   return (
@@ -210,11 +294,7 @@ function AuthScreen() {
   );
 }
 
-function ProfileGate({ profile, error, refresh, mode }: { profile: SparkProfile | null; error: string; refresh: () => void; mode: 'onboarding' | 'edit' }) {
-  return <ProfileEditor initial={profile} onSaved={refresh} mode={mode} loadError={error} />;
-}
-
-function ProfileEditor({ initial, onSaved, mode, loadError = '' }: { initial: SparkProfile | null; onSaved: () => void; mode: 'onboarding' | 'edit'; loadError?: string }) {
+function ProfileEditor({ initial, onSaved, mode, loadError = '' }: { initial: SparkProfile | null; onSaved: () => void | Promise<void>; mode: 'onboarding' | 'edit'; loadError?: string }) {
   const [draft, setDraft] = useState<ProfileDraft>(() => draftFromProfile(initial));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(loadError);
@@ -235,13 +315,13 @@ function ProfileEditor({ initial, onSaved, mode, loadError = '' }: { initial: Sp
       if (uploadError) throw uploadError;
       setDraft((old) => ({ ...old, photos: [...old.photos, path] }));
       vibrate();
-    } catch (err) { setError(errorText(err)); }
+    } catch (err) { console.error('Adding photo failed:', err); setError(errorText(err)); }
     finally { setUploading(false); }
   };
   const removePhoto = async (url: string) => {
     const path = storagePathFromPublicUrl(url) ?? url;
     const { error: removeError } = await supabase.storage.from('photos').remove([path]);
-    if (removeError) { setError(removeError.message); return; }
+    if (removeError) { console.error('Removing photo failed:', removeError); setError(removeError.message); return; }
     setDraft((old) => ({ ...old, photos: old.photos.filter((photo) => photo !== url) }));
   };
   const save = async (event: FormEvent) => {
@@ -264,13 +344,18 @@ function ProfileEditor({ initial, onSaved, mode, loadError = '' }: { initial: Sp
         p_vibe: draft.vibe || null,
         p_min_age: draft.minAge,
         p_max_age: draft.maxAge,
-        p_prompts: draft.prompts,
+        p_prompts: asArray(draft.prompts),
       });
       if (saveError) throw saveError;
-      await onSaved();
-      setNotice('Your profile is saved.');
-      if (mode === 'onboarding') navigate('/');
-    } catch (err) { setError(errorText(err)); }
+      if (mode === 'onboarding') {
+        // Mark the profile as existing right away (no reload, no cached "no profile"), then go to Discover.
+        void onSaved();
+        navigate('/', { replace: true });
+      } else {
+        await onSaved();
+        setNotice('Your profile is saved.');
+      }
+    } catch (err) { console.error('Saving profile failed:', err); setError(errorText(err)); }
     finally { setPending(false); }
   };
   const toggleInterest = (interest: string) => setDraft((old) => ({ ...old, interests: old.interests.includes(interest) ? old.interests.filter((item) => item !== interest) : [...old.interests, interest] }));
@@ -324,7 +409,7 @@ function ProfileEditor({ initial, onSaved, mode, loadError = '' }: { initial: Sp
 }
 
 type TabKey = 'discover' | 'likes' | 'sparks' | 'profile';
-function AppShell({ user, profile, streakCount, setProfile, reloadProfile }: { user: User; profile: SparkProfile; streakCount: number | null; setProfile: (profile: SparkProfile | null) => void; reloadProfile: () => void }) {
+function AppShell({ user, profile, streakCount, streakError, setProfile, reloadProfile }: { user: User; profile: SparkProfile; streakCount: number | null; streakError: string; setProfile: (profile: SparkProfile | null) => void; reloadProfile: () => void | Promise<void> }) {
   const location = useLocation();
   const navigate = useNavigate();
   const activeTab: TabKey = location.pathname.startsWith('/likes') ? 'likes' : location.pathname.startsWith('/sparks') ? 'sparks' : location.pathname.startsWith('/profile') ? 'profile' : 'discover';
@@ -350,7 +435,7 @@ function AppShell({ user, profile, streakCount, setProfile, reloadProfile }: { u
           <Route path="/likes" element={<Likes />} />
           <Route path="/sparks" element={<Sparks />} />
           <Route path="/profile/edit" element={<ProfileEditor initial={profile} onSaved={reloadProfile} mode="edit" />} />
-          <Route path="/profile" element={<ProfilePage user={user} profile={profile} streakCount={streakCount} setProfile={setProfile} />} />
+          <Route path="/profile" element={<ProfilePage user={user} profile={profile} streakCount={streakCount} streakError={streakError} setProfile={setProfile} />} />
           <Route path="/settings" element={<SettingsPage profile={profile} radius={radius} setRadius={setRadius} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -373,6 +458,8 @@ function Discover({ radius, setRadius }: { radius: number; setRadius: (radius: n
   const [match, setMatch] = useState<{ person?: SparkProfile; expires?: string } | null>(null);
   const [wyr, setWyr] = useState<Record<string, unknown> | null>(null);
   const [answering, setAnswering] = useState(false);
+  const [locError, setLocError] = useState('');
+  const [locBusy, setLocBusy] = useState(false);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const seen = useRef(0);
   const [canUndo, setCanUndo] = useState(false);
@@ -382,16 +469,30 @@ function Discover({ radius, setRadius }: { radius: number; setRadius: (radius: n
   const load = useCallback(async () => {
     setLoading(true); setError('');
     const { data, error: queryError } = await supabase.rpc('discover', { p_limit: 20, p_max_km: radius });
-    if (queryError) setError(queryError.message);
+    if (queryError) { console.error('Discover failed:', queryError); setError(queryError.message); }
     else { setPeople(Array.isArray(data) ? data as SparkProfile[] : []); setIndex(0); }
     setLoading(false);
   }, [radius]);
   useEffect(() => { const timer = window.setTimeout(() => void load(), 240); return () => window.clearTimeout(timer); }, [load]);
+  // Location is saved every time Discover opens. A failure only shows a banner; it never affects routing.
+  const updateLocation = useCallback(async (coords?: Coords) => {
+    setLocBusy(true); setLocError('');
+    try {
+      await (coords ? saveLocation(coords) : syncLocation());
+      if (seen.current === 0) void load();
+    } catch (err) {
+      console.error('Location update failed:', err);
+      setLocError(errorText(err));
+    } finally { setLocBusy(false); }
+  }, [load]);
+  useEffect(() => { void updateLocation();
+  }, []);
   useEffect(() => {
     if (!current || seen.current === 0 || seen.current % 10 !== 0) return;
     let active = true;
-    supabase.rpc('next_wyr', { p_limit: 10 }).then(({ data }) => {
+    supabase.rpc('next_wyr', { p_limit: 10 }).then(({ data, error: wyrError }) => {
       if (!active) return;
+      if (wyrError) { console.error('Could not load a Would You Rather question:', wyrError); setError(wyrError.message); return; }
       const question = Array.isArray(data) ? data[0] : data;
       if (question && typeof question === 'object') setWyr(question as Record<string, unknown>);
     });
@@ -412,10 +513,11 @@ function Discover({ radius, setRadius }: { radius: number; setRadius: (radius: n
       seen.current += 1;
       setIndex((old) => old + 1);
       if (index >= people.length - 2) {
-        const { data: more } = await supabase.rpc('discover', { p_limit: 20, p_max_km: radius });
+        const { data: more, error: moreError } = await supabase.rpc('discover', { p_limit: 20, p_max_km: radius });
+        if (moreError) throw moreError;
         if (Array.isArray(more) && more.length > 0) { setPeople((old) => [...old, ...(more as SparkProfile[])]); }
       }
-    } catch (err) { setError(errorText(err)); }
+    } catch (err) { console.error('Swipe failed:', err); setError(errorText(err)); }
     finally { setSwiping(false); }
   };
   const undo = async () => {
@@ -423,7 +525,7 @@ function Discover({ radius, setRadius }: { radius: number; setRadius: (radius: n
       const { error: undoError } = await supabase.rpc('rewind_last_swipe');
       if (undoError) throw undoError;
       setIndex((old) => Math.max(0, old - 1)); setCanUndo(false); vibrate(10);
-    } catch (err) { setError(errorText(err)); }
+    } catch (err) { console.error('Rewind failed:', err); setError(errorText(err)); }
   };
   const answer = async (choice: 'a' | 'b') => {
     if (!wyr) return;
@@ -431,7 +533,7 @@ function Discover({ radius, setRadius }: { radius: number; setRadius: (radius: n
     setAnswering(true);
     const { error: answerError } = await supabase.rpc('answer_wyr', { p_question: questionId, p_choice: choice });
     setAnswering(false);
-    if (answerError) setError(answerError.message);
+    if (answerError) { console.error('Answering failed:', answerError); setError(answerError.message); }
     else { setWyr(null); vibrate(); }
   };
   const swipePointer = (event: PointerEvent<HTMLElement>) => {
@@ -451,6 +553,7 @@ function Discover({ radius, setRadius }: { radius: number; setRadius: (radius: n
         <button onClick={() => navigate('/settings')} type="button" className="flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs font-semibold text-slate-300"><MapPin size={14} /> Up to {radius} km <ChevronDown size={13} /></button>
       </div>
       <label className="mb-4 flex items-center gap-3 rounded-xl border border-white/[.06] bg-white/[.025] px-4 py-3 text-xs text-slate-400">Distance <input aria-label="Maximum distance in kilometers" type="range" min={5} max={200} step={5} value={radius} onChange={(event) => setRadius(Number(event.target.value))} className="flex-1" /><span className="min-w-12 text-right text-slate-300">{radius} km</span></label>
+      {locError && <div role="alert" data-testid="banner-location" className="mb-4 rounded-xl border border-rose-400/20 bg-rose-500/10 p-3 text-sm text-rose-200"><p>{locError}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={locBusy} onClick={() => void updateLocation()} className="secondary-button px-3 py-2 text-xs">Try again</button><button type="button" disabled={locBusy} onClick={() => void updateLocation(LUSAKA)} className="secondary-button px-3 py-2 text-xs">Use Lusaka ({LUSAKA.lat}, {LUSAKA.lng})</button></div></div>}
       {error && <div role="alert" className="mb-4 flex items-center justify-between rounded-xl border border-rose-400/20 bg-rose-500/10 p-3 text-sm text-rose-200"><span>{error}</span><button onClick={() => void load()} className="underline">Retry</button></div>}
       {loading ? <div className="panel flex min-h-[440px] flex-col items-center justify-center"><div className="skeleton-card mb-5 h-16 w-16 rounded-full" /><div className="skeleton-line w-36" /><div className="skeleton-line mt-2 w-24" /><p className="mt-5 text-sm text-slate-500">Finding your kind of people…</p></div> :
         current ? <div className="mx-auto max-w-[440px]">
@@ -519,7 +622,7 @@ function Likes() {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     const { data, error: queryError } = await supabase.rpc('who_liked_me');
-    if (queryError) setError(queryError.message);
+    if (queryError) { console.error('Could not load likes:', queryError); setError(queryError.message); }
     else setLikes(Array.isArray(data) ? data as SparkProfile[] : []);
     setLoading(false);
   }, []);
@@ -527,7 +630,7 @@ function Likes() {
   const likeBack = async (person: SparkProfile) => {
     setActing(person.id);
     const { data, error: swipeError } = await supabase.rpc('swipe', { p_target: person.id, p_action: 'like' });
-    if (swipeError) setError(swipeError.message);
+    if (swipeError) { console.error('Like back failed:', swipeError); setError(swipeError.message); }
     else {
       setLikes((old) => old.filter((item) => item.id !== person.id)); vibrate([10, 25, 12]);
       const payload = Array.isArray(data) ? data[0] : data;
@@ -563,8 +666,9 @@ function Sparks() {
   </section>;
 }
 
-function ProfilePage({ user, profile, streakCount, setProfile }: { user: User; profile: SparkProfile; streakCount: number | null; setProfile: (profile: SparkProfile | null) => void }) {
+function ProfilePage({ user, profile, streakCount, streakError, setProfile }: { user: User; profile: SparkProfile; streakCount: number | null; streakError: string; setProfile: (profile: SparkProfile | null) => void }) {
   const [badges, setBadges] = useState<Record<string, unknown>[]>([]);
+  const [badgesError, setBadgesError] = useState('');
   const [mood, setMood] = useState(String(profile.mood || ''));
   const [discoverable, setDiscoverable] = useState(profile.discoverable !== false);
   const [showDistance, setShowDistance] = useState(profile.show_distance !== false);
@@ -574,22 +678,29 @@ function ProfilePage({ user, profile, streakCount, setProfile }: { user: User; p
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
   useEffect(() => {
-    supabase.from('badges').select('*').then(({ data }) => setBadges((data || []) as Record<string, unknown>[]));
+    supabase.from('badges').select('*').then(({ data, error }) => {
+      if (error) { console.error('Could not load badges:', error); setBadgesError(error.message); return; }
+      setBadges((data || []) as Record<string, unknown>[]);
+    });
   }, []);
   const saveSettings = async (next: { mood?: string; discoverable?: boolean; showDistance?: boolean }) => {
     const values = { mood: next.mood ?? mood, discoverable: next.discoverable ?? discoverable, showDistance: next.showDistance ?? showDistance };
     setSaving(true); setSettingsError('');
     const { error } = await supabase.rpc('update_settings', { p_mood: values.mood || null, p_discoverable: values.discoverable, p_show_distance: values.showDistance });
-    if (error) setSettingsError(error.message);
+    if (error) { console.error('Saving settings failed:', error); setSettingsError(error.message); }
     else { setMood(values.mood); setDiscoverable(values.discoverable); setShowDistance(values.showDistance); setProfile({ ...profile, mood: values.mood, discoverable: values.discoverable, show_distance: values.showDistance }); }
     setSaving(false);
   };
-  const signOut = async () => { await supabase.auth.signOut(); };
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) { console.error('Sign out failed:', error); setSettingsError(error.message); }
+  };
   const deleteAccount = async () => {
     setDeleting(true);
     const { error } = await supabase.rpc('delete_my_account');
-    if (error) { setSettingsError(error.message); setDeleting(false); return; }
-    await supabase.auth.signOut();
+    if (error) { console.error('Deleting account failed:', error); setSettingsError(error.message); setDeleting(false); return; }
+    const { error: signOutError } = await supabase.auth.signOut();
+    if (signOutError) { console.error('Sign out after delete failed:', signOutError); setSettingsError(signOutError.message); setDeleting(false); }
   };
   return <section className="animate-in space-y-5">
     <div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-[.2em] text-rose-300">Your corner</p><h1 className="display mt-1 text-3xl font-extrabold">Profile</h1></div><button type="button" onClick={() => void signOut()} className="secondary-button flex items-center gap-2 px-3 py-2.5 text-xs"><LogOut size={15} /> Sign out</button></div>
@@ -603,7 +714,7 @@ function ProfilePage({ user, profile, streakCount, setProfile }: { user: User; p
         <button className="secondary-button mt-5 flex w-full items-center justify-center gap-2" onClick={() => navigate('/profile/edit')}><Settings2 size={16} /> Edit profile</button>
       </div>
     </section>
-     <section className="panel flex items-center gap-3 p-4"><div className="grid h-11 w-11 place-items-center rounded-full bg-amber-300/10 text-amber-200"><Flame size={21} /></div><div><p className="text-xs font-bold uppercase tracking-[.16em] text-amber-200">Your streak</p><p className="mt-1 text-sm text-slate-300">{streakCount === null ? 'Keep showing up on Spark.' : `${streakCount} ${streakCount === 1 ? 'day' : 'days'} in a row`}</p></div></section>
+     <section className="panel flex items-center gap-3 p-4"><div className="grid h-11 w-11 place-items-center rounded-full bg-amber-300/10 text-amber-200"><Flame size={21} /></div><div><p className="text-xs font-bold uppercase tracking-[.16em] text-amber-200">Your streak</p><p className="mt-1 text-sm text-slate-300">{streakCount === null ? 'Keep showing up on Spark.' : `${streakCount} ${streakCount === 1 ? 'day' : 'days'} in a row`}</p>{streakError && <p role="alert" className="mt-1 text-xs text-rose-200">{streakError}</p>}</div></section>
      <section className="panel p-5">
       <div className="mb-4"><h2 className="display text-lg font-bold">Your presence</h2><p className="mt-1 text-sm text-slate-400">Set the tone for how you show up.</p></div>
       <label className="block text-sm font-medium text-slate-300">Current mood<select className="field mt-2" value={mood} disabled={saving} onChange={(e) => void saveSettings({ mood: e.target.value })}><option value="">Choose a mood</option>{['Open to anything', 'Looking for a spark', 'Taking it slow', 'Here for the conversations'].map((option) => <option key={option}>{option}</option>)}</select></label>
@@ -617,6 +728,7 @@ function ProfilePage({ user, profile, streakCount, setProfile }: { user: User; p
     <section className="panel p-5">
       <div className="mb-4 flex items-center justify-between"><div><h2 className="display text-lg font-bold">Badges</h2><p className="mt-1 text-sm text-slate-400">Little markers of your Spark journey.</p></div><BadgeCheck size={21} className="text-amber-200" /></div>
       {badges.length ? <div className="flex flex-wrap gap-2">{badges.map((badge, i) => <span key={String(badge.id ?? i)} className="flex items-center gap-2 rounded-full border border-amber-200/15 bg-amber-200/[.05] px-3 py-2 text-xs text-amber-100"><Star size={13} />{String(badge.name ?? badge.title ?? badge.badge ?? 'Spark badge')}</span>)}</div> : <p className="text-sm text-slate-500">Your badges will show up here as you use Spark.</p>}
+      {badgesError && <p role="alert" className="mt-3 text-sm text-rose-200">{badgesError}</p>}
     </section>
     <button className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-300/15 py-3 text-sm text-rose-200/80 transition hover:bg-rose-300/5" onClick={() => setDeleteOpen(true)}><Trash2 size={15} /> Delete account</button>
     {deleteOpen && <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-5"><div className="panel w-full max-w-sm p-5"><h2 className="display text-xl font-bold">Delete your account?</h2><p className="mt-2 text-sm leading-6 text-slate-400">This permanently removes your Spark account and profile. This cannot be undone.</p><div className="mt-5 flex gap-3"><button className="secondary-button flex-1" onClick={() => setDeleteOpen(false)}>Keep account</button><button className="flex-1 rounded-xl bg-rose-400 px-3 py-3 text-sm font-bold text-[#26141a]" onClick={() => void deleteAccount()} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete account'}</button></div></div></div>}
@@ -641,7 +753,7 @@ function SettingsPage({ profile, radius, setRadius }: { profile: SparkProfile; r
       setError('Enter valid latitude and longitude coordinates.'); setPending(false); return;
     }
     const { error: locationError } = await supabase.rpc('update_my_location', { p_lat: latitude, p_lng: longitude });
-    if (locationError) setError(locationError.message); else setMessage('Travel location updated.');
+    if (locationError) { console.error('Travel location update failed:', locationError); setError(locationError.message); } else setMessage('Travel location updated.');
     setPending(false);
   };
   return <section className="animate-in">
