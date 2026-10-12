@@ -1,8 +1,9 @@
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent } from 'react';
-import { animate, motion, useMotionValue, useTransform, type AnimationPlaybackControls, type PanInfo } from 'framer-motion';
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { animate, motion, useDragControls, useMotionValue, useTransform, type AnimationPlaybackControls, type PanInfo } from 'framer-motion';
 import { BadgeCheck, ChevronUp, Heart, MapPin, Sparkles, X, Zap } from 'lucide-react';
 import { photoUrl, type SparkProfile } from '@/lib/supabase';
 import { distanceText, isVerified, personAge, photosOf, sharedInterests } from '@/lib/discover-utils';
+import { resolveSwipeDirection } from '@/lib/discover-gesture';
 
 export type SwipeAction = 'pass' | 'like' | 'spark';
 export type CardHandle = { act: (action: SwipeAction) => Promise<void> };
@@ -18,9 +19,6 @@ type CardProps = {
   onAct: (action: SwipeAction) => Promise<boolean>;
   onOpenDetails: () => void;
 };
-
-const FLING_DISTANCE = 110;
-const FLING_VELOCITY = 650;
 
 export function CardFallback({ name }: { name: string }) {
   return (
@@ -53,6 +51,7 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
   const interests = Array.isArray(person.interests) ? person.interests.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : [];
   const shared = sharedInterests(myInterests, interests);
   const sharedKeys = new Set(shared.map((item) => item.toLowerCase()));
+  const dragControls = useDragControls();
 
   // The card starts slightly lower and transparent (or slides back in after an undo), then eases to rest.
   const startX = reduced ? 0 : entry === 'undo-left' ? -140 : entry === 'undo-right' ? 140 : 0;
@@ -124,17 +123,37 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
 
   useImperativeHandle(ref, () => ({ act: run }), [run]);
 
-  // A real drag (more than 10px) must never also count as a tap on a photo zone; finger jitter still counts as a tap.
+  // Keep photo/detail buttons clickable without starting the card's drag recognizer.
+  const startDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    dragged.current = false;
+    if (disabledRef.current || !(event.target instanceof Element)) return;
+    if (event.target.closest('button, a, input, textarea, select, [role="button"], [data-swipe-ignore]')) return;
+    flights.current.forEach((flight) => flight.stop());
+    dragControls.start(event.nativeEvent);
+  };
+
+  // A real drag (more than 10px) must never also count as a tap on a photo zone.
   const onDrag = (_event: unknown, info: PanInfo) => {
     if (!dragged.current && Math.hypot(info.offset.x, info.offset.y) > 10) dragged.current = true;
   };
-  const onDragEnd = (_event: unknown, info: PanInfo) => {
-    const { offset, velocity } = info;
-    const horizontal = Math.abs(offset.x) >= Math.abs(offset.y);
-    if (!horizontal && (offset.y < -FLING_DISTANCE || velocity.y < -FLING_VELOCITY)) void run('spark');
-    else if (horizontal && (offset.x > FLING_DISTANCE || velocity.x > FLING_VELOCITY)) void run('like');
-    else if (horizontal && (offset.x < -FLING_DISTANCE || velocity.x < -FLING_VELOCITY)) void run('pass');
-    // otherwise dragSnapToOrigin eases the card back
+  const onDragEnd = (event: MouseEvent | PointerEvent | TouchEvent, info: PanInfo) => {
+    const action = event.type === 'pointercancel'
+      ? null
+      : resolveSwipeDirection(info.offset, info.velocity);
+    if (action) {
+      void run(action);
+      return;
+    }
+
+    // We own the snap-back so it cannot race Framer Motion's automatic drag snap.
+    flights.current.forEach((flight) => flight.stop());
+    if (reduced) {
+      x.set(0);
+      y.set(0);
+      return;
+    }
+    const spring = { type: 'spring', stiffness: 320, damping: 26 } as const;
+    flights.current = [animate(x, 0, spring), animate(y, 0, spring)];
   };
 
   const prevPhoto = () => { if (!dragged.current) setPhotoIndex((i) => Math.max(0, i - 1)); };
@@ -160,21 +179,22 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
       tabIndex={0}
       style={{ x, y, rotate, opacity, scale, touchAction: 'none' }}
       drag={!disabled}
-      dragSnapToOrigin
+      dragControls={dragControls}
+      dragListener={false}
       dragElastic={0.85}
       dragMomentum={false}
-      onPointerDown={() => { dragged.current = false; }}
+      onPointerDown={startDrag}
       onDrag={onDrag}
       onDragEnd={onDragEnd}
       onKeyDown={onKeyDown}
       data-testid="profile-card"
-      className="dc-card relative isolate h-full w-full select-none overflow-hidden rounded-[28px] border border-white/10 bg-[#21212a] shadow-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-300"
+      className="dc-card absolute inset-0 isolate h-full w-full select-none overflow-hidden rounded-[28px] border border-white/10 bg-[#21212a] shadow-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-300"
     >
       {showPhoto
-        ? <img key={currentPhoto} src={photoUrl(currentPhoto)} alt={`${name}'s photo ${photoIndex + 1} of ${photos.length}`} draggable={false} decoding="async" loading="eager" fetchPriority="high" onError={() => setFailed((old) => new Set(old).add(currentPhoto))} className="absolute inset-0 -z-10 h-full w-full object-cover" />
-        : <CardFallback name={name} />}
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/45 to-transparent" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[64%] bg-gradient-to-t from-[#0c0c11] via-[#0c0c11]/70 to-transparent" />
+        ? <img key={currentPhoto} src={photoUrl(currentPhoto)} alt={`${name}'s photo ${photoIndex + 1} of ${photos.length}`} draggable={false} decoding="async" loading="eager" fetchPriority="high" onError={() => setFailed((old) => new Set(old).add(currentPhoto))} className="absolute inset-0 z-0 block h-full w-full object-cover object-center" />
+        : <div className="absolute inset-0 z-0"><CardFallback name={name} /></div>}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-28 bg-gradient-to-b from-black/45 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[64%] bg-gradient-to-t from-[#0c0c11] via-[#0c0c11]/70 to-transparent" />
 
       {photos.length > 1 && (
         <>

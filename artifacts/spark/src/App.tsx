@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent } from 'react';
 import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import type { Session, User } from '@supabase/supabase-js';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowLeft, ArrowRight, BadgeCheck, ChevronDown, Compass, Flame, Heart, ImagePlus,
   LoaderCircle, LogOut, MapPin, MessageCircle, Navigation, RotateCcw,
@@ -360,12 +360,15 @@ function ShellBody({ user, profile, streakCount, streakError, setProfile, reload
     { key: 'profile', label: 'Profile', icon: UserRound, path: '/profile' },
   ];
   const [filters, setFilters] = useState<DiscoverFilters>(() => initialFilters(profile, user.id));
+  const [navOpen, setNavOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [verifiedSeen, setVerifiedSeen] = useState(false);
   const [likesCount, setLikesCount] = useState(0);
   const [filterNotice, setFilterNotice] = useState('');
   const defaults = defaultFilters(profile);
   const filterCount = activeFilterCount(filters, defaults);
+
+  useEffect(() => { setNavOpen(false); }, [location.pathname]);
 
   // Age range and who-to-show live on the profile, so keep the filters in step when the profile changes.
   const interestedKey = JSON.stringify(profile.interested_in ?? null);
@@ -434,13 +437,57 @@ function ShellBody({ user, profile, streakCount, streakError, setProfile, reload
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
-      <nav aria-label="Main navigation" className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-white/[.07] bg-[#17171f]/95 px-3 pt-2 backdrop-blur-xl">
-        <div className="mx-auto grid max-w-lg grid-cols-4">
-          {navItems.map(({ key, label, icon: Icon, path }) => <NavLink to={path} key={key} end={key === 'discover'} data-testid={`nav-${key}`} className={({ isActive }) => `relative flex min-h-14 flex-col items-center justify-center gap-1 text-[10px] font-semibold transition ${isActive ? 'text-rose-300' : 'text-slate-500 hover:text-slate-300'}`}>{key === 'profile' && profile.photos?.[0]
-            ? <span className={`grid h-[22px] w-[22px] overflow-hidden rounded-full ring-2 ${activeTab === 'profile' ? 'ring-rose-300' : 'ring-slate-600'}`}><img src={photoUrl(profile.photos[0])} alt="" className="h-full w-full object-cover" /></span>
-            : <Icon size={20} strokeWidth={activeTab === key ? 2.35 : 1.8} />}<span className="leading-none">{label}</span>{key === 'sparks' && <SparksBadge />}{key === 'likes' && likesCount > 0 && <span aria-label={`${likesCount} new likes`} data-testid="likes-badge" className="absolute right-[calc(50%-22px)] top-1.5 grid min-w-[17px] place-items-center rounded-full bg-rose-400 px-1 text-[10px] font-extrabold leading-[17px] text-[#23121a]">{likesCount > 9 ? '9+' : likesCount}</span>}{activeTab === key && <span className="absolute -top-[9px] h-0.5 w-7 rounded-full bg-rose-300" />}</NavLink>)}
-        </div>
-      </nav>
+      <div className="dc-compass-dock" data-testid="compass-dock">
+        <motion.button
+          type="button"
+          className="dc-compass-trigger"
+          aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+          aria-expanded={navOpen}
+          aria-controls="spark-discovery-nav"
+          onClick={() => setNavOpen((open) => !open)}
+          whileTap={{ scale: 0.92 }}
+          data-testid="compass-toggle"
+        >
+          <motion.span animate={{ rotate: navOpen ? 45 : 0 }} transition={{ duration: 0.2, ease: 'easeOut' }}>
+            <Compass size={21} strokeWidth={2.2} />
+          </motion.span>
+        </motion.button>
+        <AnimatePresence initial={false}>
+          {navOpen && (
+            <motion.nav
+              id="spark-discovery-nav"
+              aria-label="Main navigation"
+              className="dc-compass-links"
+              initial={{ opacity: 0, x: -10, scale: 0.96 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: -8, scale: 0.97 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              onKeyDown={(event) => { if (event.key === 'Escape') setNavOpen(false); }}
+              data-testid="compass-links"
+            >
+              {navItems.map(({ key, label, icon: Icon, path }) => (
+                <NavLink
+                  to={path}
+                  key={key}
+                  end={key === 'discover'}
+                  data-testid={`nav-${key}`}
+                  title={label}
+                  aria-label={label}
+                  onClick={() => setNavOpen(false)}
+                  className={({ isActive }) => `dc-compass-link ${isActive ? 'is-active' : ''}`}
+                >
+                  {key === 'profile' && profile.photos?.[0]
+                    ? <span className={`grid h-[19px] w-[19px] overflow-hidden rounded-full ring-2 ${activeTab === 'profile' ? 'ring-rose-300' : 'ring-slate-600'}`}><img src={photoUrl(profile.photos[0])} alt="" className="h-full w-full object-cover" /></span>
+                    : <Icon size={18} strokeWidth={activeTab === key ? 2.35 : 1.8} />}
+                  <span className="dc-compass-label">{label}</span>
+                  {key === 'sparks' && <SparksBadge />}
+                  {key === 'likes' && likesCount > 0 && <span aria-label={`${likesCount} new likes`} data-testid="likes-badge" className="dc-compass-badge">{likesCount > 9 ? '9+' : likesCount}</span>}
+                </NavLink>
+              ))}
+            </motion.nav>
+          )}
+        </AnimatePresence>
+      </div>
       {filterOpen && <FilterSheet filters={filters} defaults={defaults} hasInterests={Array.isArray(profile.interests) && profile.interests.length > 0} verifiedAvailable={verifiedSeen} onApply={applyFilters} onClose={() => setFilterOpen(false)} onOpenTravel={() => { setFilterOpen(false); navigate('/settings'); }} />}
       {filterNotice && <div role="status" className="pointer-events-none fixed inset-x-0 bottom-[calc(88px+env(safe-area-inset-bottom))] z-40 flex justify-center"><span className="animate-in rounded-full border border-rose-200/25 bg-[#23171d]/95 px-4 py-2 text-xs font-semibold text-rose-100 shadow-xl">{filterNotice}</span></div>}
     </div>

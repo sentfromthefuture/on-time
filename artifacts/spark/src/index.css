@@ -163,6 +163,18 @@ input[type="range"] { accent-color: hsl(var(--primary)); }
 .dc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .dc-stage { position: relative; flex: 1 1 auto; width: 100%; max-width: 440px; min-height: 340px; margin: 0 auto; }
 @media (min-width: 640px) { .dc-stage { max-height: 700px; } }
+.dc-compass-dock { position: fixed; z-index: 50; inset-inline-start: max(10px, env(safe-area-inset-left, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 8px; pointer-events: none; }
+.dc-compass-trigger { display: grid; flex: none; width: 48px; height: 48px; place-items: center; border: 1px solid hsl(347 55% 62% / .48); border-radius: 50%; color: hsl(347 90% 84%); background: hsl(235 17% 13% / .96); box-shadow: 0 8px 24px rgb(0 0 0 / .42), 0 0 18px hsl(347 70% 55% / .13); backdrop-filter: blur(14px); pointer-events: auto; }
+.dc-compass-trigger:focus-visible, .dc-compass-link:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 3px; }
+.dc-compass-links { display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid hsl(var(--border)); border-radius: 18px; background: hsl(235 17% 11% / .96); box-shadow: 0 8px 24px rgb(0 0 0 / .42); backdrop-filter: blur(14px); pointer-events: auto; transform-origin: left center; }
+.dc-compass-link { position: relative; display: flex; width: 52px; height: 52px; flex: none; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border-radius: 13px; color: hsl(231 10% 63%); transition: color .16s, background .16s, transform .16s; }
+.dc-compass-link:hover { color: hsl(231 12% 88%); background: rgb(255 255 255 / .06); }
+.dc-compass-link:active { transform: scale(.95); }
+.dc-compass-link.is-active { color: hsl(347 90% 84%); background: hsl(347 55% 50% / .13); }
+.dc-compass-label { max-width: 100%; overflow: hidden; font-size: 8px; font-weight: 700; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+.dc-compass-badge { position: absolute; top: 0; right: 0; display: grid; min-width: 16px; place-items: center; border-radius: 999px; background: hsl(347 82% 66%); padding: 0 4px; color: #23121a; font-size: 9px; font-weight: 800; line-height: 16px; }
+.dc-compass-link > span[aria-label$="unread"] { top: 0; right: 0; }
+@media (max-width: 350px) { .dc-compass-dock { gap: 5px; } .dc-compass-trigger { width: 44px; height: 44px; } .dc-compass-links { gap: 2px; padding: 3px; } .dc-compass-link { width: 44px; height: 46px; } .dc-compass-label { display: none; } }
 .dc-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; border-radius: 999px; border: 1px solid hsl(var(--border)); background: hsl(235 16% 12% / .9); padding: 0 12px 0 11px; font-size: 12.5px; font-weight: 600; color: hsl(231 12% 78%); }
 .dc-pill:active { transform: scale(.97); }
 .dc-actions { display: flex; align-items: center; justify-content: center; gap: 14px; width: 100%; max-width: 440px; margin: 14px auto 2px; }
