@@ -224,7 +224,7 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
       <motion.div aria-hidden="true" style={{ opacity: passOpacity }} className="pointer-events-none absolute left-5 top-14 z-20 rotate-12 rounded-xl border-2 border-slate-300 px-3 py-1.5 text-lg font-extrabold uppercase tracking-wider text-slate-200"><X className="mr-1 inline" size={18} />Pass</motion.div>
       <motion.div aria-hidden="true" style={{ opacity: sparkOpacity }} className="pointer-events-none absolute left-1/2 top-1/3 z-20 -translate-x-1/2 rounded-xl border-2 border-amber-300 px-3 py-1.5 text-lg font-extrabold uppercase tracking-wider text-amber-200"><Zap className="mr-1 inline" size={18} fill="currentColor" />Spark</motion.div>
 
-      <div className="absolute inset-x-0 bottom-0 z-10 p-5 pt-10" onClick={openDetails}>
+      <div className="dc-profile-info absolute inset-x-0 bottom-0 z-10 p-5 pt-10" onClick={openDetails}>
         {shared.length > 0 && (
           <p data-testid="shared-pill" className="mb-2.5 inline-flex items-center gap-1.5 rounded-full border border-amber-200/25 bg-amber-300/15 px-2.5 py-1 text-[11px] font-semibold text-amber-100">
             <Zap size={11} fill="currentColor" />

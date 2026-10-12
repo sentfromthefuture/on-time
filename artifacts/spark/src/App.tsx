@@ -419,7 +419,7 @@ function ShellBody({ user, profile, streakCount, streakError, setProfile, reload
   }
   return (
     <div className="spark-shell min-h-[100dvh] pb-[calc(78px+env(safe-area-inset-bottom))]">
-      <header className="sticky top-0 z-20 border-b border-white/[.045] bg-[#14141b]/85 px-5 py-3 backdrop-blur-xl">
+      <header className={`sticky top-0 z-20 border-b border-white/[.045] bg-[#14141b]/85 px-5 py-3 backdrop-blur-xl ${activeTab === 'discover' ? 'dc-shell-header' : ''}`}>
         <div className="mx-auto flex max-w-2xl items-center justify-between">
           <div className="flex items-center gap-2.5"><div className="brand-mark brand-mark-small"><Sparkles size={16} /></div><span className="display text-xl font-extrabold tracking-tight">{APP_NAME}</span></div>
           <p className="hidden items-center gap-1.5 text-xs text-slate-400 sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Your next hello is out there</p>
