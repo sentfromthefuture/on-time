@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Sparkles, Zap } from 'lucide-react';
+import { Portal } from '@/components/ui/Portal';
 import { useSparks } from '@/components/sparks/SparksProvider';
 import { photoUrl } from '@/lib/supabase';
 import type { MatchPopup } from '@/lib/ui';
@@ -37,7 +38,7 @@ export default function MatchModal({ match, onClose }: { match: MatchPopup; onCl
     onClose();
     navigate(id ? `/sparks/${id}` : '/sparks');
   };
-  return <div role="dialog" aria-modal="true" aria-labelledby="match-title" className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-[#0e0e14]/90 p-5 backdrop-blur-md">
+  return <Portal><div role="dialog" aria-modal="true" aria-labelledby="match-title" className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-[#0e0e14]/90 p-5 backdrop-blur-md">
     <div className="confetti" aria-hidden="true">{Array.from({ length: 22 }, (_, i) => <i key={i} style={{ left: `${(i * 37) % 100}%`, animationDelay: `${(i % 6) * .16}s`, background: i % 3 === 0 ? '#f39aab' : i % 3 === 1 ? '#f3c575' : '#b1d3ca' }} />)}</div>
     <div className="relative z-10 w-full max-w-sm animate-in text-center">
       <div className="mx-auto mb-7 flex justify-center -space-x-5">{[match.person?.photos?.[0], myPhoto].map((image, index) => <div key={index} className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-4 border-[#18171f] bg-[#30222b]">{image ? <img src={photoUrl(image)} alt="" loading="lazy" className="h-full w-full object-cover" /> : <Sparkles className="text-rose-200" size={28} />}</div>)}</div>
@@ -46,5 +47,5 @@ export default function MatchModal({ match, onClose }: { match: MatchPopup; onCl
       <button autoFocus disabled={opening} data-testid="match-open-chat" className="primary-button mt-7 flex w-full items-center justify-center gap-2" onClick={() => void openChat()}>{opening ? 'Opening…' : 'Open chat'} <ArrowRight size={17} /></button>
       <button onClick={onClose} className="mt-4 text-sm text-slate-500 hover:text-slate-300">Keep discovering</button>
     </div>
-  </div>;
+  </div></Portal>;
 }

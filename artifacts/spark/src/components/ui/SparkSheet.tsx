@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { Portal } from '@/components/ui/Portal';
 
 const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
@@ -58,6 +59,7 @@ export function SparkSheet({ title, onClose, children, footer, size = 'sheet', h
 
   const full = size === 'full';
   return (
+    <Portal>
     <div
       className={`fixed inset-0 z-[60] flex ${full ? 'items-stretch' : 'items-end'} justify-center bg-black/70 backdrop-blur-sm ${closing ? 'sk-backdrop-out' : 'sk-backdrop-in'}`}
       onClick={close}
@@ -80,5 +82,6 @@ export function SparkSheet({ title, onClose, children, footer, size = 'sheet', h
         {footer && <div className="shrink-0 border-t border-white/[.07] px-5 pb-[max(env(safe-area-inset-bottom),16px)] pt-3.5">{typeof footer === 'function' ? footer({ close }) : footer}</div>}
       </div>
     </div>
+    </Portal>
   );
 }

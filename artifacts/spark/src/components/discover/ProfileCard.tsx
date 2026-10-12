@@ -100,10 +100,11 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
 
   useImperativeHandle(ref, () => ({ act: run }), [run]);
 
+  // A real drag (more than 10px) must never also count as a tap on a photo zone; finger jitter still counts as a tap.
+  const onDrag = (_event: unknown, info: PanInfo) => {
+    if (!dragged.current && Math.hypot(info.offset.x, info.offset.y) > 10) dragged.current = true;
+  };
   const onDragEnd = (_event: unknown, info: PanInfo) => {
-    // A drag must never also count as a tap on a photo zone.
-    dragged.current = true;
-    window.setTimeout(() => { dragged.current = false; }, 80);
     const { offset, velocity } = info;
     const horizontal = Math.abs(offset.x) >= Math.abs(offset.y);
     if (!horizontal && (offset.y < -FLING_DISTANCE || velocity.y < -FLING_VELOCITY)) void run('spark');
@@ -146,6 +147,8 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
       dragSnapToOrigin
       dragElastic={0.85}
       dragMomentum={false}
+      onPointerDown={() => { dragged.current = false; }}
+      onDrag={onDrag}
       onDragEnd={onDragEnd}
       onKeyDown={onKeyDown}
       data-testid="profile-card"

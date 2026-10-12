@@ -95,7 +95,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   color: hsl(var(--foreground)); padding: 12px 16px; font-weight: 600;
 }
 .panel { border: 1px solid hsl(var(--card-border)); background: hsl(var(--card)); border-radius: 22px; }
-.animate-in { animation: rise-in .42s cubic-bezier(.2,.8,.2,1) both; }
+.animate-in { animation: rise-in .42s cubic-bezier(.2,.8,.2,1) backwards; } /* backwards, not both: a lingering transform would trap position:fixed children */
 @keyframes rise-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes pop { 0% { transform: scale(.84); opacity: .3 } 70% { transform: scale(1.04); } 100% { transform: scale(1); opacity: 1 } }
 .pop-in { animation: pop .45s cubic-bezier(.2,.8,.2,1) both; }

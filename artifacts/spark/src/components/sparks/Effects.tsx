@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Flame, Zap } from 'lucide-react';
+import { Portal } from '@/components/ui/Portal';
 import { SparkAvatar } from '@/components/sparks/SparkAvatar';
 import { useSparks } from '@/components/sparks/SparksProvider';
 import { buzz } from '@/lib/spark-utils';
@@ -34,7 +35,7 @@ export function SeveringOverlay({ name, theirPhoto, myPhoto, onDone }: { name: s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
-    <div className="sk-overlay" role="dialog" aria-modal="true" aria-label={`Your spark with ${name} faded`} data-testid="severing">
+    <Portal><div className="sk-overlay" role="dialog" aria-modal="true" aria-label={`Your spark with ${name} faded`} data-testid="severing">
       <div className="sk-stage">
         <div className="sk-av sk-av-l"><SparkAvatar path={myPhoto} name="You" size={76} /></div>
         <div className="sk-av sk-av-r"><SparkAvatar path={theirPhoto} name={name} size={76} /></div>
@@ -53,7 +54,7 @@ export function SeveringOverlay({ name, theirPhoto, myPhoto, onDone }: { name: s
       <h2 className="display sk-late sk-title mt-8 text-3xl font-extrabold text-orange-50" style={{ ['--at' as string]: '4s' }}>The spark faded.</h2>
       <p className="sk-late mt-2 max-w-xs text-sm leading-relaxed text-slate-400" style={{ ['--at' as string]: '4.4s' }}>You won't see each other again.</p>
       <button type="button" onClick={finish} className="primary-button sk-late mt-8 min-w-[160px]" style={{ ['--at' as string]: '5.2s' }}>Continue</button>
-    </div>
+    </div></Portal>
   );
 }
 
@@ -67,7 +68,7 @@ export function KeepOverlay({ name, theirPhoto, myPhoto, onDone }: { name: strin
     return () => { window.clearTimeout(merge); window.clearTimeout(auto); };
   }, []);
   return (
-    <div className="sk-overlay sk-overlay-warm" role="dialog" aria-modal="true" aria-label={`Your spark with ${name} was kept`} onClick={() => onDoneRef.current()} data-testid="keep">
+    <Portal><div className="sk-overlay sk-overlay-warm" role="dialog" aria-modal="true" aria-label={`Your spark with ${name} was kept`} onClick={() => onDoneRef.current()} data-testid="keep">
       <div className="sk-stage sk-stage-keep">
         <div className="sk-keep-av sk-keep-av-l"><SparkAvatar path={myPhoto} name="You" size={56} /></div>
         <div className="sk-keep-av sk-keep-av-r"><SparkAvatar path={theirPhoto} name={name} size={56} /></div>
@@ -82,7 +83,7 @@ export function KeepOverlay({ name, theirPhoto, myPhoto, onDone }: { name: strin
       <h2 className="display sk-late mt-6 text-3xl font-extrabold text-amber-50" style={{ ['--at' as string]: '2.1s' }}>Kept.</h2>
       <p className="sk-late mt-2 max-w-xs text-sm leading-relaxed text-amber-100/70" style={{ ['--at' as string]: '2.5s' }}>This spark is now a flame. No more countdown.</p>
       <p className="sk-late mt-8 text-xs text-slate-500" style={{ ['--at' as string]: '3.4s' }}>Tap anywhere to continue</p>
-    </div>
+    </div></Portal>
   );
 }
 
@@ -96,12 +97,12 @@ export function BonusOverlay({ name, onDone }: { name: string; onDone: () => voi
     return () => window.clearTimeout(auto);
   }, []);
   return (
-    <div className="sk-overlay sk-overlay-bolt" role="dialog" aria-modal="true" aria-label={`Bonus round with ${name}`} onClick={() => onDoneRef.current()} data-testid="bonus">
+    <Portal><div className="sk-overlay sk-overlay-bolt" role="dialog" aria-modal="true" aria-label={`Bonus round with ${name}`} onClick={() => onDoneRef.current()} data-testid="bonus">
       <div className="sk-strobe" />
       <Zap className="sk-bolt" size={104} strokeWidth={1.6} fill="currentColor" />
       <h2 className="display sk-late mt-6 text-4xl font-extrabold text-yellow-100" style={{ ['--at' as string]: '.5s' }}>Bonus round: +24h</h2>
       <p className="sk-late mt-2 max-w-xs text-sm leading-relaxed text-slate-300" style={{ ['--at' as string]: '.9s' }}>The window just got longer. Make it count.</p>
-    </div>
+    </div></Portal>
   );
 }
 
