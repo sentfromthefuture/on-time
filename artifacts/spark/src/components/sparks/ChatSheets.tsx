@@ -1,26 +1,11 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Check, Copy, Loader2, MessageCircle, ShieldCheck, X } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Check, Copy, Loader2, MessageCircle, ShieldCheck } from 'lucide-react';
+import { SparkSheet } from '@/components/ui/SparkSheet';
 import { getMatchContact, reportUser, shareContact, type ReportReason } from '@/lib/sparks';
 import { buzz, messageOf, normalizeContacts, whatsappLink, type Contacts, type MatchRow } from '@/lib/spark-utils';
 
-export function BottomSheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
-      <div className="sk-sheet panel max-h-[88dvh] w-full max-w-lg overflow-y-auto p-5 pb-[max(env(safe-area-inset-bottom),22px)]" onClick={(event) => event.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="display text-xl font-extrabold">{title}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-full bg-white/[.06] text-slate-300"><X size={17} /></button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
+/** The chat sheets share the accessible Sheet used across the app. */
+export const BottomSheet = SparkSheet;
 
 export function ConfirmDialog({ title, body, confirmLabel, danger, busy, error, onConfirm, onCancel }: {
   title: string; body: string; confirmLabel: string; danger?: boolean; busy: boolean; error: string; onConfirm: () => void; onCancel: () => void;

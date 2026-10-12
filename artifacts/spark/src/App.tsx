@@ -5,40 +5,24 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeft, ArrowRight, BadgeCheck, ChevronDown, Compass, Flame, Heart, ImagePlus,
   LoaderCircle, LogOut, MapPin, MessageCircle, Navigation, RotateCcw,
-  Settings2, ShieldCheck, Sparkles, Star, Trash2, UserRound, X, Zap,
+  Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Star, Trash2, UserRound, X, Zap,
 } from 'lucide-react';
 import { APP_NAME } from '@/config';
 import { photoUrl, supabase, type SparkProfile } from '@/lib/supabase';
 import { compressPhoto, storagePathFromPublicUrl } from '@/lib/photos';
-import { LUSAKA, saveLocation, syncLocation, type Coords } from '@/lib/location';
+import { syncLocation } from '@/lib/location';
+import { errorText, matchIdOf, vibrate, type MatchPopup } from '@/lib/ui';
+import { ageFromDate, draftFromProfile, genderOptions, upsertProfile, type ProfileDraft } from '@/lib/profile';
+import { activeFilterCount, clampFilters, defaultFilters, initialFilters, saveStoredFilters, type DiscoverFilters } from '@/lib/discover-utils';
+import DiscoverPage from '@/components/discover/DiscoverPage';
+import { FilterSheet } from '@/components/discover/FilterSheet';
+import MatchModal from '@/components/MatchModal';
 import { SparksBadge, SparksProvider, useSparks } from '@/components/sparks/SparksProvider';
 import { EffectsHost } from '@/components/sparks/Effects';
 import SparksPage from '@/components/sparks/SparksPage';
 import ChatPage from '@/components/sparks/ChatPage';
 
-const genderOptions = ['man', 'woman', 'nonbinary', 'other'];
 const interestOptions = ['Live music', 'Long walks', 'Cooking', 'Art', 'Books', 'Outdoors', 'Film', 'Coffee', 'Travel', 'Design', 'Dance', 'Museums'];
-const errorText = (error: unknown): string => {
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === 'string' && error) return error;
-  if (error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string' && (error as { message: string }).message) {
-    return (error as { message: string }).message;
-  }
-  return 'Something went wrong. Please try again.';
-};
-type MatchPopup = { person?: SparkProfile; expires?: string; matchId?: string };
-const matchIdOf = (record: Record<string, unknown>) => (typeof record.match_id === 'string' ? record.match_id : typeof record.id === 'string' ? record.id : undefined);
-// Always hand Supabase a real array, never a JSON string such as "[]".
-const asArray = (value: unknown): unknown[] => {
-  if (Array.isArray(value)) return value;
-  if (typeof value === 'string') {
-    try {
-      const parsed: unknown = JSON.parse(value);
-      if (Array.isArray(parsed)) return parsed;
-    } catch { /* not JSON, fall through */ }
-  }
-  return [];
-};
 // Drops any stored onboarding flag or cached profile so a stale "no profile" can never be reused.
 const clearOnboardingCache = () => {
   for (const store of [window.localStorage, window.sessionStorage]) {
@@ -49,54 +33,6 @@ const clearOnboardingCache = () => {
     } catch (error) { console.error('Could not clear cached onboarding data:', error); }
   }
 };
-const ageFromDate = (value?: string) => {
-  if (!value) return undefined;
-  const born = new Date(`${value}T00:00:00`);
-  const now = new Date();
-  return now.getFullYear() - born.getFullYear() - (now < new Date(now.getFullYear(), born.getMonth(), born.getDate()) ? 1 : 0);
-};
-const vibrate = (pattern: number | number[] = 14) => {
-  if ('vibrate' in navigator) navigator.vibrate(pattern);
-};
-
-type ProfileDraft = {
-  name: string;
-  birthdate: string;
-  gender: string;
-  interestedIn: string[];
-  bio: string;
-  photos: string[];
-  interests: string[];
-  vibe: string;
-  minAge: number;
-  maxAge: number;
-  prompts: unknown[];
-};
-const blankDraft: ProfileDraft = {
-  name: '', birthdate: '', gender: '', interestedIn: [], bio: '', photos: [], interests: [],
-  vibe: '', minAge: 22, maxAge: 36, prompts: [],
-};
-
-function draftFromProfile(profile?: SparkProfile | null): ProfileDraft {
-  if (!profile) return blankDraft;
-  return {
-    ...blankDraft,
-    name: String(profile.name || ''),
-    birthdate: String(profile.birthdate || ''),
-    gender: String(profile.gender || ''),
-    interestedIn: Array.isArray(profile.interested_in)
-      ? profile.interested_in.map(String)
-      : profile.interested_in ? [String(profile.interested_in)] : [],
-    bio: String(profile.bio || ''),
-    photos: Array.isArray(profile.photos) ? profile.photos.map(String) : [],
-    interests: Array.isArray(profile.interests) ? profile.interests.map(String) : [],
-    vibe: String(profile.vibe || ''),
-    minAge: Number(profile.min_age || 22),
-    maxAge: Number(profile.max_age || 36),
-    prompts: asArray(profile.prompts),
-  };
-}
-
 function App() {
   const [streakCount, setStreakCount] = useState<number | null>(null);
   const [streakError, setStreakError] = useState('');
@@ -339,20 +275,7 @@ function ProfileEditor({ initial, onSaved, mode, loadError = '' }: { initial: Sp
     if (draft.minAge < 18 || draft.maxAge < draft.minAge) { setError('Choose an age range starting at 18 or older.'); return; }
     setPending(true);
     try {
-      const { error: saveError } = await supabase.rpc('upsert_my_profile', {
-        p_name: draft.name.trim(),
-        p_birthdate: draft.birthdate,
-        p_gender: draft.gender,
-        p_interested_in: draft.interestedIn,
-        p_bio: draft.bio.slice(0, 500),
-        p_photos: draft.photos,
-        p_interests: draft.interests,
-        p_vibe: draft.vibe || null,
-        p_min_age: draft.minAge,
-        p_max_age: draft.maxAge,
-        p_prompts: asArray(draft.prompts),
-      });
-      if (saveError) throw saveError;
+      await upsertProfile(draft);
       if (mode === 'onboarding') {
         // Mark the profile as existing right away (no reload, no cached "no profile"), then go to Discover.
         void onSaved();
@@ -436,7 +359,57 @@ function ShellBody({ user, profile, streakCount, streakError, setProfile, reload
     { key: 'sparks', label: 'Sparks', icon: Zap, path: '/sparks' },
     { key: 'profile', label: 'Profile', icon: UserRound, path: '/profile' },
   ];
-  const [radius, setRadius] = useState(Number(profile.max_km || 50));
+  const [filters, setFilters] = useState<DiscoverFilters>(() => initialFilters(profile, user.id));
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [verifiedSeen, setVerifiedSeen] = useState(false);
+  const [likesCount, setLikesCount] = useState(0);
+  const [filterNotice, setFilterNotice] = useState('');
+  const defaults = defaultFilters(profile);
+  const filterCount = activeFilterCount(filters, defaults);
+
+  // Age range and who-to-show live on the profile, so keep the filters in step when the profile changes.
+  const interestedKey = JSON.stringify(profile.interested_in ?? null);
+  useEffect(() => {
+    const base = defaultFilters(profile);
+    setFilters((old) => clampFilters({ ...old, minAge: base.minAge, maxAge: base.maxAge, genders: base.genders }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.min_age, profile.max_age, interestedKey]);
+
+  // Real count of people who liked you, for the Likes tab badge.
+  useEffect(() => {
+    let alive = true;
+    const count = async () => {
+      const { data, error } = await supabase.rpc('who_liked_me');
+      if (!alive) return;
+      if (error) { console.error('Could not count likes:', error); return; }
+      setLikesCount(Array.isArray(data) ? data.length : 0);
+    };
+    void count();
+    const onVisible = () => { if (document.visibilityState === 'visible') void count(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { alive = false; document.removeEventListener('visibilitychange', onVisible); };
+  }, [user.id]);
+
+  useEffect(() => {
+    if (!filterNotice) return;
+    const timer = window.setTimeout(() => setFilterNotice(''), 2600);
+    return () => window.clearTimeout(timer);
+  }, [filterNotice]);
+
+  const applyFilters = async (next: DiscoverFilters) => {
+    // Age range and who you want to see are saved on your profile so discovery itself honours them.
+    const profileChanged = next.minAge !== filters.minAge || next.maxAge !== filters.maxAge || [...next.genders].sort().join('|') !== [...filters.genders].sort().join('|');
+    if (profileChanged) {
+      await upsertProfile({ ...draftFromProfile(profile), minAge: next.minAge, maxAge: next.maxAge, interestedIn: next.genders });
+      try { await reloadProfile(); } catch (error) { console.error('Could not refresh your profile after saving filters:', error); }
+    }
+    saveStoredFilters(user.id, next);
+    setFilters(next);
+    const count = activeFilterCount(next, defaults);
+    setFilterNotice(count > 0 ? `Filters applied · ${count} active` : 'Filters cleared');
+  };
+  const resetFilters = () => { void applyFilters({ ...defaults, maxKm: 50 }).catch((error) => console.error('Resetting filters failed:', error)); };
+  const setRadius = (km: number) => setFilters((old) => { const next = clampFilters({ ...old, maxKm: km }); saveStoredFilters(user.id, next); return next; });
   // A chat is full screen: no header or tab bar.
   if (/^\/sparks\/[^/]+/.test(location.pathname)) {
     return <Routes><Route path="/sparks/:matchId" element={<ChatPage />} /></Routes>;
@@ -447,208 +420,34 @@ function ShellBody({ user, profile, streakCount, streakError, setProfile, reload
         <div className="mx-auto flex max-w-2xl items-center justify-between">
           <div className="flex items-center gap-2.5"><div className="brand-mark brand-mark-small"><Sparkles size={16} /></div><span className="display text-xl font-extrabold tracking-tight">{APP_NAME}</span></div>
           <p className="hidden items-center gap-1.5 text-xs text-slate-400 sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Your next hello is out there</p>
-          {activeTab === 'discover' && <button onClick={() => navigate('/settings')} type="button" aria-label="Open discovery settings" className="rounded-full p-2 text-slate-400 hover:bg-white/5 hover:text-white"><Settings2 size={18} /></button>}
+          {activeTab === 'discover' && <button onClick={() => setFilterOpen(true)} type="button" aria-label={`Open filters${filterCount ? `, ${filterCount} active` : ''}`} data-testid="open-filters" className="relative inline-flex min-h-10 items-center gap-1.5 rounded-full border border-white/10 bg-white/[.04] px-3.5 text-xs font-semibold text-slate-200 hover:bg-white/[.07]"><SlidersHorizontal size={15} />Filters{filterCount > 0 && <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-rose-400 px-1 text-[10px] font-extrabold text-[#23121a]">{filterCount}</span>}</button>}
         </div>
       </header>
-      <div className="mx-auto max-w-2xl px-4 pb-7 pt-5">
+      <div className={`mx-auto max-w-2xl px-4 ${activeTab === 'discover' ? 'overflow-x-clip pb-2 pt-3' : 'pb-7 pt-5'}`}>
         <Routes>
-          <Route path="/" element={<Discover radius={radius} setRadius={setRadius} />} />
-          <Route path="/likes" element={<Likes />} />
+          <Route path="/" element={<DiscoverPage profile={profile} filters={filters} onOpenFilters={() => setFilterOpen(true)} onResetFilters={resetFilters} onVerifiedSeen={setVerifiedSeen} />} />
+          <Route path="/likes" element={<Likes onCountChange={setLikesCount} />} />
           <Route path="/sparks" element={<SparksPage />} />
           <Route path="/profile/edit" element={<ProfileEditor initial={profile} onSaved={reloadProfile} mode="edit" />} />
           <Route path="/profile" element={<ProfilePage user={user} profile={profile} streakCount={streakCount} streakError={streakError} setProfile={setProfile} />} />
-          <Route path="/settings" element={<SettingsPage profile={profile} radius={radius} setRadius={setRadius} />} />
+          <Route path="/settings" element={<SettingsPage profile={profile} radius={filters.maxKm} setRadius={setRadius} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
       <nav aria-label="Main navigation" className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-white/[.07] bg-[#17171f]/95 px-3 pt-2 backdrop-blur-xl">
         <div className="mx-auto grid max-w-lg grid-cols-4">
-          {navItems.map(({ key, label, icon: Icon, path }) => <NavLink to={path} key={key} end={key === 'discover'} data-testid={`nav-${key}`} className={({ isActive }) => `relative flex min-h-14 flex-col items-center justify-center gap-1 text-[10px] font-semibold transition ${isActive ? 'text-rose-300' : 'text-slate-500 hover:text-slate-300'}`}><Icon size={20} strokeWidth={activeTab === key ? 2.35 : 1.8} /><span>{label}</span>{key === 'sparks' && <SparksBadge />}{activeTab === key && <span className="absolute -top-[9px] h-0.5 w-7 rounded-full bg-rose-300" />}</NavLink>)}
+          {navItems.map(({ key, label, icon: Icon, path }) => <NavLink to={path} key={key} end={key === 'discover'} data-testid={`nav-${key}`} className={({ isActive }) => `relative flex min-h-14 flex-col items-center justify-center gap-1 text-[10px] font-semibold transition ${isActive ? 'text-rose-300' : 'text-slate-500 hover:text-slate-300'}`}>{key === 'profile' && profile.photos?.[0]
+            ? <span className={`grid h-[22px] w-[22px] overflow-hidden rounded-full ring-2 ${activeTab === 'profile' ? 'ring-rose-300' : 'ring-slate-600'}`}><img src={photoUrl(profile.photos[0])} alt="" className="h-full w-full object-cover" /></span>
+            : <Icon size={20} strokeWidth={activeTab === key ? 2.35 : 1.8} />}<span className="leading-none">{label}</span>{key === 'sparks' && <SparksBadge />}{key === 'likes' && likesCount > 0 && <span aria-label={`${likesCount} new likes`} data-testid="likes-badge" className="absolute right-[calc(50%-22px)] top-1.5 grid min-w-[17px] place-items-center rounded-full bg-rose-400 px-1 text-[10px] font-extrabold leading-[17px] text-[#23121a]">{likesCount > 9 ? '9+' : likesCount}</span>}{activeTab === key && <span className="absolute -top-[9px] h-0.5 w-7 rounded-full bg-rose-300" />}</NavLink>)}
         </div>
       </nav>
+      {filterOpen && <FilterSheet filters={filters} defaults={defaults} hasInterests={Array.isArray(profile.interests) && profile.interests.length > 0} verifiedAvailable={verifiedSeen} onApply={applyFilters} onClose={() => setFilterOpen(false)} onOpenTravel={() => { setFilterOpen(false); navigate('/settings'); }} />}
+      {filterNotice && <div role="status" className="pointer-events-none fixed inset-x-0 bottom-[calc(88px+env(safe-area-inset-bottom))] z-40 flex justify-center"><span className="animate-in rounded-full border border-rose-200/25 bg-[#23171d]/95 px-4 py-2 text-xs font-semibold text-rose-100 shadow-xl">{filterNotice}</span></div>}
     </div>
   );
 }
 
-function Discover({ radius, setRadius }: { radius: number; setRadius: (radius: number) => void }) {
-  const [people, setPeople] = useState<SparkProfile[]>([]);
-  const [index, setIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [swiping, setSwiping] = useState(false);
-  const [match, setMatch] = useState<MatchPopup | null>(null);
-  const [wyr, setWyr] = useState<Record<string, unknown> | null>(null);
-  const [answering, setAnswering] = useState(false);
-  const [locError, setLocError] = useState('');
-  const [locBusy, setLocBusy] = useState(false);
-  const drag = useRef<{ x: number; y: number } | null>(null);
-  const seen = useRef(0);
-  const [canUndo, setCanUndo] = useState(false);
-  const current = people[index];
-  const navigate = useNavigate();
-
-  const load = useCallback(async () => {
-    setLoading(true); setError('');
-    const { data, error: queryError } = await supabase.rpc('discover', { p_limit: 20, p_max_km: radius });
-    if (queryError) { console.error('Discover failed:', queryError); setError(queryError.message); }
-    else { setPeople(Array.isArray(data) ? data as SparkProfile[] : []); setIndex(0); }
-    setLoading(false);
-  }, [radius]);
-  useEffect(() => { const timer = window.setTimeout(() => void load(), 240); return () => window.clearTimeout(timer); }, [load]);
-  // Location is saved every time Discover opens. A failure only shows a banner; it never affects routing.
-  const updateLocation = useCallback(async (coords?: Coords) => {
-    setLocBusy(true); setLocError('');
-    try {
-      await (coords ? saveLocation(coords) : syncLocation());
-      if (seen.current === 0) void load();
-    } catch (err) {
-      console.error('Location update failed:', err);
-      setLocError(errorText(err));
-    } finally { setLocBusy(false); }
-  }, [load]);
-  useEffect(() => { void updateLocation();
-  }, []);
-  useEffect(() => {
-    if (!current || seen.current === 0 || seen.current % 10 !== 0) return;
-    let active = true;
-    supabase.rpc('next_wyr', { p_limit: 10 }).then(({ data, error: wyrError }) => {
-      if (!active) return;
-      if (wyrError) { console.error('Could not load a Would You Rather question:', wyrError); setError(wyrError.message); return; }
-      const question = Array.isArray(data) ? data[0] : data;
-      if (question && typeof question === 'object') setWyr(question as Record<string, unknown>);
-    });
-    return () => { active = false; };
-  }, [current, index]);
-  const act = async (action: 'pass' | 'like' | 'spark', person = current) => {
-    if (!person || swiping) return;
-    setSwiping(true); vibrate(action === 'pass' ? 8 : [12, 30, 18]);
-    try {
-      const { data, error: swipeError } = await supabase.rpc('swipe', { p_target: person.id, p_action: action });
-      if (swipeError) throw swipeError;
-      const payload = Array.isArray(data) ? data[0] : data;
-      if (payload && typeof payload === 'object' && (payload as Record<string, unknown>).matched === true) {
-        const record = payload as Record<string, unknown>;
-        setMatch({ person, expires: typeof record.expires_at === 'string' ? record.expires_at : undefined, matchId: matchIdOf(record) });
-      }
-      setCanUndo(true);
-      seen.current += 1;
-      setIndex((old) => old + 1);
-      if (index >= people.length - 2) {
-        const { data: more, error: moreError } = await supabase.rpc('discover', { p_limit: 20, p_max_km: radius });
-        if (moreError) throw moreError;
-        if (Array.isArray(more) && more.length > 0) { setPeople((old) => [...old, ...(more as SparkProfile[])]); }
-      }
-    } catch (err) { console.error('Swipe failed:', err); setError(errorText(err)); }
-    finally { setSwiping(false); }
-  };
-  const undo = async () => {
-    try {
-      const { error: undoError } = await supabase.rpc('rewind_last_swipe');
-      if (undoError) throw undoError;
-      setIndex((old) => Math.max(0, old - 1)); setCanUndo(false); vibrate(10);
-    } catch (err) { console.error('Rewind failed:', err); setError(errorText(err)); }
-  };
-  const answer = async (choice: 'a' | 'b') => {
-    if (!wyr) return;
-    const questionId = wyr.id ?? wyr.question_id;
-    setAnswering(true);
-    const { error: answerError } = await supabase.rpc('answer_wyr', { p_question: questionId, p_choice: choice });
-    setAnswering(false);
-    if (answerError) { console.error('Answering failed:', answerError); setError(answerError.message); }
-    else { setWyr(null); vibrate(); }
-  };
-  const swipePointer = (event: PointerEvent<HTMLElement>) => {
-    const origin = drag.current;
-    drag.current = null;
-    if (!origin || !current) return;
-    const dx = event.clientX - origin.x, dy = event.clientY - origin.y;
-    if (Math.abs(dx) < 65 && Math.abs(dy) < 70) return;
-    if (Math.abs(dy) > Math.abs(dx) && dy < -65) void act('spark');
-    else if (dx > 65) void act('like');
-    else if (dx < -65) void act('pass');
-  };
-  return (
-    <section className="animate-in">
-      <div className="mb-4 flex items-end justify-between">
-        <div><p className="text-xs font-bold uppercase tracking-[.2em] text-rose-300">A fresh face</p><h1 className="display mt-1 text-3xl font-extrabold">Discover</h1></div>
-        <button onClick={() => navigate('/settings')} type="button" className="flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs font-semibold text-slate-300"><MapPin size={14} /> Up to {radius} km <ChevronDown size={13} /></button>
-      </div>
-      <label className="mb-4 flex items-center gap-3 rounded-xl border border-white/[.06] bg-white/[.025] px-4 py-3 text-xs text-slate-400">Distance <input aria-label="Maximum distance in kilometers" type="range" min={5} max={200} step={5} value={radius} onChange={(event) => setRadius(Number(event.target.value))} className="flex-1" /><span className="min-w-12 text-right text-slate-300">{radius} km</span></label>
-      {locError && <div role="alert" data-testid="banner-location" className="mb-4 rounded-xl border border-rose-400/20 bg-rose-500/10 p-3 text-sm text-rose-200"><p>{locError}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={locBusy} onClick={() => void updateLocation()} className="secondary-button px-3 py-2 text-xs">Try again</button><button type="button" disabled={locBusy} onClick={() => void updateLocation(LUSAKA)} className="secondary-button px-3 py-2 text-xs">Use Lusaka ({LUSAKA.lat}, {LUSAKA.lng})</button></div></div>}
-      {error && <div role="alert" className="mb-4 flex items-center justify-between rounded-xl border border-rose-400/20 bg-rose-500/10 p-3 text-sm text-rose-200"><span>{error}</span><button onClick={() => void load()} className="underline">Retry</button></div>}
-      {loading ? <div className="panel flex min-h-[440px] flex-col items-center justify-center"><div className="skeleton-card mb-5 h-16 w-16 rounded-full" /><div className="skeleton-line w-36" /><div className="skeleton-line mt-2 w-24" /><p className="mt-5 text-sm text-slate-500">Finding your kind of people…</p></div> :
-        current ? <div className="mx-auto max-w-[440px]">
-          <motion.article initial={{ opacity: 0, y: 14, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: 'easeOut' }} whileTap={{ scale: 0.995 }} onPointerDown={(event) => { drag.current = { x: event.clientX, y: event.clientY }; }} onPointerUp={swipePointer} onPointerCancel={() => { drag.current = null; }} className="profile-card relative isolate flex min-h-[480px] select-none touch-none flex-col justify-end overflow-hidden rounded-[28px] border border-white/10 bg-[#21212a] shadow-2xl sm:min-h-[550px]" aria-label={`Profile of ${current.name}`}>
-             {current.photos?.[0] ? <img src={photoUrl(current.photos[0])} alt={`${current.name}'s profile`} loading="lazy" draggable={false} className="absolute inset-0 -z-10 h-full w-full object-cover" /> : <div className="profile-fallback absolute inset-0 -z-10 grid place-items-center"><span className="display text-8xl font-extrabold text-rose-100/20">{String(current.name || '?').slice(0, 1).toUpperCase()}</span></div>}
-            <div className="absolute inset-0 -z-10 bg-gradient-to-t from-[#121218] via-[#15151a]/20 to-black/5" />
-             <div className="absolute left-4 top-4 flex gap-2">{current.liked_you && <span className="rounded-full border border-rose-200/30 bg-[#21171d]/80 px-3 py-1.5 text-xs font-bold text-rose-100"><Heart className="mr-1 inline" size={13} fill="currentColor" /> They liked you</span>}{typeof current.vibe_score === 'number' && <span className="rounded-full bg-slate-950/65 px-3 py-1.5 text-xs font-semibold text-amber-100"><Sparkles className="mr-1 inline" size={13} /> {Math.round(current.vibe_score)} vibe</span>}</div>
-            <div className="p-5 sm:p-6">
-              <div className="mb-3 flex items-end justify-between"><h2 className="display text-3xl font-extrabold">{current.name}{current.age ? <span className="ml-2 font-medium text-white/85">{current.age}</span> : ageFromDate(String(current.birthdate || '')) ? <span className="ml-2 font-medium text-white/85">{ageFromDate(String(current.birthdate))}</span> : null}</h2>{typeof current.distance_km === 'number' && <span className="mb-1 flex items-center gap-1 text-xs text-white/70"><MapPin size={12} />{current.distance_km.toFixed(1)} km away</span>}</div>
-              {current.bio && <p className="line-clamp-3 text-sm leading-6 text-white/85">{current.bio}</p>}
-              {current.interests?.length ? <div className="mt-3 flex flex-wrap gap-2">{current.interests.slice(0, 5).map((interest) => <span key={interest} className="rounded-full border border-white/15 bg-black/20 px-3 py-1.5 text-[11px] text-white/90">{interest}</span>)}</div> : null}
-              {current.photos && current.photos.length > 1 && <div className="mt-4 flex gap-1.5" aria-label={`${current.photos.length} photos`}>{current.photos.map((_, i) => <span key={i} className={`h-1 flex-1 rounded-full ${i === 0 ? 'bg-white' : 'bg-white/30'}`} />)}</div>}
-            </div>
-          </motion.article>
-          <div className="mt-4 flex items-center justify-center gap-3">
-             <button type="button" onClick={() => void undo()} disabled={!canUndo} aria-label="Undo last swipe" className="action-orbit action-muted"><RotateCcw size={18} /></button>
-            <button type="button" onClick={() => void act('pass')} aria-label="Pass" disabled={swiping} className="action-orbit action-pass"><X size={25} /></button>
-            <button type="button" onClick={() => void act('spark')} aria-label="Send a spark" disabled={swiping} className="action-orbit action-spark"><Zap size={22} fill="currentColor" /></button>
-            <button type="button" onClick={() => void act('like')} aria-label="Like" disabled={swiping} className="action-orbit action-like"><Heart size={24} fill="currentColor" /></button>
-          </div>
-          <p className="mt-3 text-center text-[11px] text-slate-600">Swipe left to pass · right to like · up to spark</p>
-          {wyr && <div className="mt-5 rounded-2xl border border-amber-200/15 bg-amber-300/[.06] p-4"><p className="text-[10px] font-bold uppercase tracking-[.2em] text-amber-200">While you’re here</p><p className="mt-2 text-sm font-semibold text-slate-100">{String(wyr.question || wyr.prompt || wyr.text || 'Would you rather…')}</p><div className="mt-3 grid grid-cols-2 gap-2"><button className="secondary-button text-xs" disabled={answering} onClick={() => void answer('a')}>{String(wyr.option_a || wyr.a || 'Option A')}</button><button className="secondary-button text-xs" disabled={answering} onClick={() => void answer('b')}>{String(wyr.option_b || wyr.b || 'Option B')}</button></div></div>}
-        </div> :
-          <div className="panel mx-auto flex min-h-[390px] max-w-[440px] flex-col items-center justify-center px-7 text-center">
-            <div className="empty-orbit mb-6"><Compass size={27} /></div><h2 className="display text-2xl font-bold">That’s everyone for now.</h2><p className="mt-2 max-w-xs text-sm leading-6 text-slate-400">Try widening your distance, or check back when more people are around.</p>
-            <label className="mt-7 w-full max-w-xs text-left text-xs font-semibold text-slate-400">Search radius <span className="float-right text-rose-200">{radius} km</span><input type="range" min={5} max={200} step={5} value={radius} onChange={(e) => setRadius(Number(e.target.value))} className="mt-3 w-full" /></label>
-            <button onClick={() => void load()} className="primary-button mt-5 px-7">Look again</button>
-            <button onClick={() => navigate('/settings')} className="mt-3 flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300"><Navigation size={13} /> Set a travel location</button>
-          </div>}
-      <div className="mt-7 rounded-2xl border border-white/[.06] bg-white/[.025] px-4 py-3 text-center"><p className="text-xs text-slate-400"><span className="mr-1.5 text-rose-300">01</span>Real people. Thoughtful introductions. Your pace.</p></div>
-      {match && <MatchModal match={match} onClose={() => setMatch(null)} />}
-    </section>
-  );
-}
-
-function MatchModal({ match, onClose }: { match: MatchPopup; onClose: () => void }) {
-  const [remaining, setRemaining] = useState('');
-  const [opening, setOpening] = useState(false);
-  const navigate = useNavigate();
-  const { matches, clockOffset, refresh } = useSparks();
-  const findRow = (rows: typeof matches) => rows.find((item) => (match.matchId ? item.match_id === match.matchId : item.user_id === match.person?.id));
-  const row = findRow(matches);
-  const expires = row?.expires_at ?? match.expires;
-  // Pull the brand-new match (and the server clock) into the Sparks list.
-  useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => {
-    const update = () => {
-      if (!expires) { setRemaining('24 hours'); return; }
-      const ms = Math.max(0, Date.parse(expires) - (Date.now() + clockOffset));
-      setRemaining(`${Math.floor(ms / 3_600_000)}h ${Math.floor(ms % 3_600_000 / 60_000)}m`);
-    };
-    update(); const timer = window.setInterval(update, 30_000);
-    return () => window.clearInterval(timer);
-  }, [expires, clockOffset]);
-  const openChat = async () => {
-    setOpening(true);
-    let id = row?.match_id;
-    if (!id) id = findRow(await refresh())?.match_id;
-    onClose();
-    navigate(id ? `/sparks/${id}` : '/sparks');
-  };
-  return <div role="dialog" aria-modal="true" aria-labelledby="match-title" className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-[#0e0e14]/90 p-5 backdrop-blur-md">
-    <div className="confetti" aria-hidden="true">{Array.from({ length: 22 }, (_, i) => <i key={i} style={{ left: `${(i * 37) % 100}%`, animationDelay: `${(i % 6) * .16}s`, background: i % 3 === 0 ? '#f39aab' : i % 3 === 1 ? '#f3c575' : '#b1d3ca' }} />)}</div>
-    <div className="relative z-10 w-full max-w-sm animate-in text-center">
-      <div className="mx-auto mb-7 flex justify-center -space-x-5">{[match.person?.photos?.[0], null].map((image, index) => <div key={index} className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-4 border-[#18171f] bg-[#30222b]">{image ? <img src={photoUrl(image)} alt="" loading="lazy" className="h-full w-full object-cover" /> : <Sparkles className="text-rose-200" size={28} />}</div>)}</div>
-      <p className="text-xs font-bold uppercase tracking-[.24em] text-rose-300">Good feeling, confirmed</p><h2 id="match-title" className="display mt-3 text-4xl font-extrabold">Your spark starts now</h2><p className="mt-3 text-sm text-slate-400">{match.person?.name ? `You and ${match.person.name} liked each other.` : 'A new connection is waiting.'}</p>
-      <div className="mx-auto mt-6 flex w-fit items-center gap-2 rounded-full border border-amber-200/15 bg-amber-200/[.06] px-4 py-2 text-xs text-amber-100"><Zap size={13} /> This spark is live for {remaining}</div>
-      <button disabled={opening} data-testid="match-open-chat" className="primary-button mt-7 flex w-full items-center justify-center gap-2" onClick={() => void openChat()}>{opening ? 'Opening…' : 'Open chat'} <ArrowRight size={17} /></button>
-      <button onClick={onClose} className="mt-4 text-sm text-slate-500 hover:text-slate-300">Keep discovering</button>
-    </div>
-  </div>;
-}
-
-function Likes() {
+function Likes({ onCountChange }: { onCountChange?: (count: number) => void }) {
   const [likes, setLikes] = useState<SparkProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -662,6 +461,7 @@ function Likes() {
     setLoading(false);
   }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { if (!loading) onCountChange?.(likes.length); }, [likes, loading, onCountChange]);
   const likeBack = async (person: SparkProfile) => {
     setActing(person.id);
     const { data, error: swipeError } = await supabase.rpc('swipe', { p_target: person.id, p_action: 'like' });
@@ -797,4 +597,5 @@ function LoadError({ message, retry }: { message: string; retry: () => void }) {
   return <main className="spark-shell grid min-h-[100dvh] place-items-center px-5"><div className="panel max-w-sm p-6 text-center"><p className="text-sm text-rose-200">{message}</p><button onClick={retry} className="primary-button mt-5">Try again</button></div></main>;
 }
 
+export { AppShell };
 export default App;

@@ -157,6 +157,43 @@ input[type="range"] { accent-color: hsl(var(--primary)); }
 @keyframes sk-sheet-up { from { transform: translateY(100%); } to { transform: none; } }
 .sk-fading { animation: sk-pulse-soft 2.4s ease-in-out infinite; }
 
+/* Discovery page */
+:root { --dc-chrome: calc(65px + 78px + 20px + env(safe-area-inset-bottom, 0px)); }
+.dc-page { display: flex; flex-direction: column; min-height: calc(100dvh - var(--dc-chrome)); }
+.dc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.dc-stage { position: relative; flex: 1 1 auto; width: 100%; max-width: 440px; min-height: 340px; margin: 0 auto; }
+@media (min-width: 640px) { .dc-stage { max-height: 700px; } }
+.dc-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; border-radius: 999px; border: 1px solid hsl(var(--border)); background: hsl(235 16% 12% / .9); padding: 0 12px 0 11px; font-size: 12.5px; font-weight: 600; color: hsl(231 12% 78%); }
+.dc-pill:active { transform: scale(.97); }
+.dc-actions { display: flex; align-items: center; justify-content: center; gap: 14px; width: 100%; max-width: 440px; margin: 14px auto 2px; }
+.dc-act { display: grid; flex: none; place-items: center; width: 58px; height: 58px; border-radius: 50%; border: 1px solid transparent; transition: transform .16s, background .16s, border-color .16s, opacity .16s; }
+.dc-act:disabled { opacity: .38; cursor: not-allowed; }
+.dc-act:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 3px; }
+.dc-act-undo { width: 44px; height: 44px; color: hsl(231 10% 68%); background: hsl(235 15% 15%); border-color: hsl(236 13% 26%); }
+.dc-act-pass { color: hsl(11 80% 80%); background: hsl(11 45% 23% / .6); border-color: hsl(11 50% 45% / .3); }
+.dc-act-spark { width: 66px; height: 66px; color: hsl(40 96% 72%); background: linear-gradient(145deg, hsl(34 70% 28% / .85), hsl(347 50% 26% / .8)); border-color: hsl(40 80% 58% / .45); box-shadow: 0 0 22px hsl(38 95% 58% / .22); }
+.dc-act-like { width: 62px; height: 62px; color: hsl(347 92% 82%); background: hsl(347 58% 28% / .78); border-color: hsl(347 62% 56% / .4); }
+.dc-act-compact { width: 52px; height: 52px; }
+.dc-act-compact.dc-act-undo { width: 40px; height: 40px; }
+.dc-actions-compact { margin: 0 auto; gap: 18px; }
+.dc-burst { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; pointer-events: none; }
+.dc-card:focus { outline: none; }
+/* Short phones: give the photo the room first, keep the essentials readable. */
+@media (max-height: 740px) {
+  .dc-hint { display: none; }
+  .dc-actions { margin-top: 10px; }
+  .dc-chips { max-height: 2.1rem; overflow: hidden; }
+}
+@media (max-height: 640px) { .dc-bio { display: none; } }
+
+/* Sheets: slide in and out */
+.sk-sheet-full { border-radius: 0; animation: sk-sheet-up .3s cubic-bezier(.2, .8, .2, 1) both; }
+.sk-sheet-out { animation: sk-sheet-down .17s ease-in both; }
+@keyframes sk-sheet-down { from { transform: none; } to { transform: translateY(100%); } }
+.sk-backdrop-in { animation: sk-fade-in .2s ease both; }
+.sk-backdrop-out { animation: sk-fade-out .17s ease both; }
+@keyframes sk-fade-out { from { opacity: 1; } to { opacity: 0; } }
+
 /* Full-screen moments: severing, keep, bonus round */
 .sk-overlay { position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; padding: 24px; text-align: center; background: radial-gradient(ellipse at 50% 36%, hsl(18 38% 12% / .97), hsl(235 22% 6% / .985) 72%); animation: sk-fade-in .35s ease both; }
 .sk-overlay-warm { background: radial-gradient(ellipse at 50% 34%, hsl(28 70% 16% / .97), hsl(235 22% 6% / .985) 72%); }
