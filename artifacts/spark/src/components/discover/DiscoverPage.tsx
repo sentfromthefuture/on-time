@@ -243,7 +243,7 @@ export default function DiscoverPage({ profile, filters, onOpenFilters, onResetF
       {current && !loading && !loadError && (
         <>
           <ActionBar canUndo={canUndo} busy={swiping} onUndo={() => void undo()} onAct={trigger} />
-          <p className="dc-hint mt-2.5 text-center text-[11px] text-slate-600">Swipe left to pass · right to like · up to spark</p>
+          <p className="dc-hint mt-2.5 text-center text-xs">Swipe the card left to pass · right to like · up to spark. Tap a button anytime.</p>
         </>
       )}
 

@@ -178,9 +178,15 @@ input[type="range"] { accent-color: hsl(var(--primary)); }
 .dc-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; border-radius: 999px; border: 1px solid hsl(var(--border)); background: hsl(235 16% 12% / .9); padding: 0 12px 0 11px; font-size: 12.5px; font-weight: 600; color: hsl(231 12% 78%); }
 .dc-pill:active { transform: scale(.97); }
 .dc-actions { display: flex; align-items: center; justify-content: center; gap: 14px; width: 100%; max-width: 440px; margin: 14px auto 2px; }
+.dc-action-item { display: flex; min-width: 44px; flex-direction: column; align-items: center; gap: 5px; }
 .dc-act { display: grid; flex: none; place-items: center; width: 58px; height: 58px; border-radius: 50%; border: 1px solid transparent; transition: transform .16s, background .16s, border-color .16s, opacity .16s; }
 .dc-act:disabled { opacity: .38; cursor: not-allowed; }
 .dc-act:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 3px; }
+.dc-act-label { color: rgb(255 255 255 / .9); font-size: 10px; font-weight: 700; line-height: 1; text-shadow: 0 1px 8px rgb(0 0 0 / .75); }
+.dc-action-item--undo .dc-act-label { color: hsl(231 10% 78%); }
+.dc-action-item--pass .dc-act-label { color: hsl(11 80% 84%); }
+.dc-action-item--spark .dc-act-label { color: hsl(40 96% 77%); }
+.dc-action-item--like .dc-act-label { color: hsl(347 92% 86%); }
 .dc-act-undo { width: 44px; height: 44px; color: hsl(231 10% 68%); background: hsl(235 15% 15%); border-color: hsl(236 13% 26%); }
 .dc-act-pass { color: hsl(11 80% 80%); background: hsl(11 45% 23% / .6); border-color: hsl(11 50% 45% / .3); }
 .dc-act-spark { width: 66px; height: 66px; color: hsl(40 96% 72%); background: linear-gradient(145deg, hsl(34 70% 28% / .85), hsl(347 50% 26% / .8)); border-color: hsl(40 80% 58% / .45); box-shadow: 0 0 22px hsl(38 95% 58% / .22); }
@@ -188,6 +194,7 @@ input[type="range"] { accent-color: hsl(var(--primary)); }
 .dc-act-compact { width: 52px; height: 52px; }
 .dc-act-compact.dc-act-undo { width: 40px; height: 40px; }
 .dc-actions-compact { margin: 0 auto; gap: 18px; }
+.dc-actions-compact .dc-action-item { gap: 0; }
 .dc-burst { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; pointer-events: none; }
 .dc-card:focus { outline: none; }
 /* On phones, keep the existing discovery controls over a full-bleed profile photo. */
@@ -216,7 +223,7 @@ input[type="range"] { accent-color: hsl(var(--primary)); }
     box-shadow: none;
   }
   .dc-profile-info {
-    bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(150px + env(safe-area-inset-bottom, 0px));
     padding-inline: 24px;
   }
   .dc-actions {
@@ -232,7 +239,7 @@ input[type="range"] { accent-color: hsl(var(--primary)); }
     position: fixed;
     z-index: 30;
     inset-inline: 0;
-    bottom: calc(91px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(110px + env(safe-area-inset-bottom, 0px));
     color: rgb(255 255 255 / .72);
   }
 }
