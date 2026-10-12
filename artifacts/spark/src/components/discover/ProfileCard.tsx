@@ -1,5 +1,5 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent } from 'react';
-import { motion, useAnimationControls, useMotionValue, useTransform, type PanInfo } from 'framer-motion';
+import { animate, motion, useMotionValue, useTransform, type AnimationPlaybackControls, type PanInfo } from 'framer-motion';
 import { BadgeCheck, ChevronUp, Heart, MapPin, Sparkles, X, Zap } from 'lucide-react';
 import { photoUrl, type SparkProfile } from '@/lib/supabase';
 import { distanceText, isVerified, personAge, photosOf, sharedInterests } from '@/lib/discover-utils';
@@ -54,13 +54,18 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
   const shared = sharedInterests(myInterests, interests);
   const sharedKeys = new Set(shared.map((item) => item.toLowerCase()));
 
-  const x = useMotionValue(0);
-  const y = useMotionValue(0);
+  // The card starts slightly lower and transparent (or slides back in after an undo), then eases to rest.
+  const startX = reduced ? 0 : entry === 'undo-left' ? -140 : entry === 'undo-right' ? 140 : 0;
+  const startY = reduced ? 0 : entry === 'undo-up' ? -140 : entry === 'fresh' ? 12 : 0;
+  const x = useMotionValue(startX);
+  const y = useMotionValue(startY);
+  const opacity = useMotionValue(reduced ? 1 : 0);
+  const scale = useMotionValue(reduced || entry !== 'fresh' ? 1 : 0.96);
   const rotate = useTransform(x, [-220, 0, 220], reduced ? [0, 0, 0] : [-9, 0, 9]);
   const likeOpacity = useTransform(x, [30, 130], [0, 1]);
   const passOpacity = useTransform(x, [-130, -30], [1, 0]);
   const sparkOpacity = useTransform(y, [-130, -30], [1, 0]);
-  const controls = useAnimationControls();
+  const flights = useRef<AnimationPlaybackControls[]>([]);
   const dragged = useRef(false);
   const busy = useRef(false);
   const alive = useRef(true);
@@ -73,8 +78,19 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
 
   useEffect(() => {
     alive.current = true;
-    if (!reduced) void controls.start({ opacity: 1, scale: 1, x: 0, y: 0, transition: { duration: 0.26, ease: 'easeOut' } });
-    return () => { alive.current = false; };
+    const stopAll = () => { flights.current.forEach((flight) => flight.stop()); flights.current = []; };
+    let guard: number | undefined;
+    if (!reduced) {
+      const options = { duration: 0.26, ease: 'easeOut' } as const;
+      flights.current = [animate(opacity, 1, options), animate(scale, 1, options), animate(x, 0, options), animate(y, 0, options)];
+      // Safety net: whatever happens to the animation, a card that is not being swiped must never stay invisible.
+      guard = window.setTimeout(() => {
+        if (busy.current) return;
+        if (opacity.get() < 1) opacity.set(1);
+        if (scale.get() !== 1) scale.set(1);
+      }, 700);
+    }
+    return () => { alive.current = false; window.clearTimeout(guard); stopAll(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -89,14 +105,22 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
   const run = useCallback(async (action: SwipeAction) => {
     if (busy.current || disabledRef.current) return;
     busy.current = true;
+    flights.current.forEach((flight) => flight.stop());
     if (!reduced) {
-      const target = action === 'pass' ? { x: -window.innerWidth, opacity: 0.4 } : action === 'like' ? { x: window.innerWidth, opacity: 0.4 } : { y: -window.innerHeight, opacity: 0.4 };
-      void controls.start({ ...target, transition: { duration: 0.24, ease: 'easeIn' } });
+      const options = { duration: 0.24, ease: 'easeIn' } as const;
+      flights.current = [
+        action === 'spark' ? animate(y, -window.innerHeight, options) : animate(x, (action === 'pass' ? -1 : 1) * window.innerWidth, options),
+        animate(opacity, 0.4, options),
+      ];
     }
     let accepted = false;
     try { accepted = await onActRef.current(action); } finally { busy.current = false; }
-    if (!accepted && alive.current) void controls.start({ x: 0, y: 0, opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 320, damping: 26 } });
-  }, [controls, reduced]);
+    if (!accepted && alive.current) {
+      flights.current.forEach((flight) => flight.stop());
+      const spring = { type: 'spring', stiffness: 320, damping: 26 } as const;
+      flights.current = [animate(x, 0, spring), animate(y, 0, spring), animate(opacity, 1, spring), animate(scale, 1, spring)];
+    }
+  }, [opacity, reduced, scale, x, y]);
 
   useImperativeHandle(ref, () => ({ act: run }), [run]);
 
@@ -124,12 +148,6 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
     else if (event.key === 'Enter') { event.preventDefault(); detailsRef.current(); }
   };
 
-  const initial = reduced
-    ? false
-    : entry === 'fresh'
-      ? { opacity: 0, scale: 0.96, y: 12 }
-      : { opacity: 0, x: entry === 'undo-left' ? -140 : entry === 'undo-right' ? 140 : 0, y: entry === 'undo-up' ? -140 : 0 };
-
   const currentPhoto = photos[photoIndex];
   const showPhoto = currentPhoto && !failed.has(currentPhoto);
   const topOffset = photos.length > 1 ? 'top-8' : 'top-3.5';
@@ -140,9 +158,7 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
     <motion.article
       aria-label={`Profile of ${name}${age ? `, ${age}` : ''}`}
       tabIndex={0}
-      initial={initial}
-      animate={controls}
-      style={{ x, y, rotate, touchAction: 'none' }}
+      style={{ x, y, rotate, opacity, scale, touchAction: 'none' }}
       drag={!disabled}
       dragSnapToOrigin
       dragElastic={0.85}
