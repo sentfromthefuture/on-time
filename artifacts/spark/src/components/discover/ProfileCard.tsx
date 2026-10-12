@@ -2,7 +2,7 @@ import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, 
 import { animate, motion, useDragControls, useMotionValue, useTransform, type AnimationPlaybackControls, type PanInfo } from 'framer-motion';
 import { BadgeCheck, ChevronUp, Heart, MapPin, Sparkles, X, Zap } from 'lucide-react';
 import { photoUrl, type SparkProfile } from '@/lib/supabase';
-import { distanceText, isVerified, personAge, photosOf, sharedInterests } from '@/lib/discover-utils';
+import { distanceText, isVerified, personAge, personDisplayName, photosOf, sharedInterests } from '@/lib/discover-utils';
 import { resolveSwipeDirection } from '@/lib/discover-gesture';
 
 export type SwipeAction = 'pass' | 'like' | 'spark';
@@ -43,7 +43,7 @@ export const ProfileCard = memo(forwardRef<CardHandle, CardProps>(function Profi
   const photos = photosOf(person);
   const [photoIndex, setPhotoIndex] = useState(0);
   const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
-  const name = String(person.name || 'Someone');
+  const name = personDisplayName(person);
   const age = personAge(person);
   const distance = distanceText(person.distance_km);
   const verified = isVerified(person);

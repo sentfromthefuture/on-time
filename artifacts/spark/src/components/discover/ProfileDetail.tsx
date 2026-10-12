@@ -3,7 +3,7 @@ import { BadgeCheck, Heart, MapPin, Zap } from 'lucide-react';
 import { SparkSheet } from '@/components/ui/SparkSheet';
 import { ActionBar } from '@/components/discover/ActionBar';
 import type { SwipeAction } from '@/components/discover/ProfileCard';
-import { contextLine, distanceText, isVerified, personAge, photosOf, promptsOf, sharedInterests } from '@/lib/discover-utils';
+import { contextLine, distanceText, isVerified, personAge, personDisplayName, photosOf, promptsOf, sharedInterests } from '@/lib/discover-utils';
 import { photoUrl, type SparkProfile } from '@/lib/supabase';
 
 /** Full profile in a sheet: every photo, the whole bio, and everything else the profile actually has. */
@@ -14,7 +14,7 @@ export function ProfileDetail({ person, myInterests, busy, onAct, onClose }: {
   onAct: (action: SwipeAction) => void;
   onClose: () => void;
 }) {
-  const name = String(person.name || 'Someone');
+  const name = personDisplayName(person);
   const age = personAge(person);
   const distance = distanceText(person.distance_km);
   const photos = photosOf(person);

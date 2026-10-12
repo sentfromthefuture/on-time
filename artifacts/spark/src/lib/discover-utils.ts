@@ -79,9 +79,22 @@ export function activeFilterCount(filters: DiscoverFilters, defaults: DiscoverFi
 }
 
 export const personAge = (person: SparkProfile): number | undefined => {
-  if (typeof person.age === 'number' && person.age > 0) return person.age;
+  const age = typeof person.age === 'number'
+    ? person.age
+    : typeof person.age === 'string' && person.age.trim()
+      ? Number(person.age)
+      : Number.NaN;
+  if (Number.isFinite(age) && age > 0) return Math.floor(age);
   return ageFromDate(typeof person.birthdate === 'string' ? person.birthdate : undefined);
 };
+
+/** Discovery RPC rows may call the profile's public name `display_name`. */
+export function personDisplayName(person: SparkProfile): string {
+  for (const value of [person.name, person.display_name]) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return 'Someone';
+}
 
 const interestList = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : []);
 

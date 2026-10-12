@@ -12,8 +12,9 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 export type SparkProfile = {
   id: string;
   name: string;
+  display_name?: string | null;
   birthdate?: string;
-  age?: number;
+  age?: number | string;
   gender?: string;
   interested_in?: string[] | string;
   bio?: string;
