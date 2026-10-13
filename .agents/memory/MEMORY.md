@@ -1,1 +1,0 @@
-- [Spark light theme](light-theme.md) — Keep Spark's shared app surfaces in light mode, not dark mode.
